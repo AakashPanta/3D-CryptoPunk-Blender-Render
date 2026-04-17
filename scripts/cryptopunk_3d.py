@@ -2,6 +2,7 @@
 Premium CryptoPunk 3D Character — Blender Python Script
 Stylized cinematic portrait recreation
 Full scene: character + lighting + camera + render settings
+Compatible: Blender 3.6 LTS
 """
 
 import bpy
@@ -42,7 +43,7 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 for bt in [bpy.data.materials, bpy.data.meshes,
            bpy.data.cameras, bpy.data.lights, bpy.data.curves]:
-    for b in bt:
+    for b in list(bt):
         bt.remove(b)
 
 print("Scene cleaned")
@@ -68,7 +69,7 @@ def make_mat(name, base_color,
     nodes = nt.nodes
     links = nt.links
 
-    for n in nodes:
+    for n in list(nodes):
         nodes.remove(n)
 
     out  = nodes.new('ShaderNodeOutputMaterial')
@@ -79,7 +80,11 @@ def make_mat(name, base_color,
     bsdf.inputs['Base Color'].default_value = (*base_color, 1.0)
     bsdf.inputs['Metallic'].default_value   = metallic
     bsdf.inputs['Roughness'].default_value  = roughness
-    bsdf.inputs['IOR'].default_value        = ior
+
+    try:
+        bsdf.inputs['IOR'].default_value = ior
+    except KeyError:
+        pass
 
     if alpha < 1.0:
         try:
@@ -90,24 +95,27 @@ def make_mat(name, base_color,
     if transmission > 0:
         for k in ['Transmission Weight', 'Transmission']:
             if k in bsdf.inputs:
-                bsdf.inputs[k].default_value = transmission
-                break
-
-    for k in ['Subsurface Weight', 'Subsurface']:
-        if k in bsdf.inputs:
-            try:
-                bsdf.inputs[k].default_value = subsurface
-            except Exception:
-                pass
-            break
-
-    if subsurface > 0 and subsurface_color:
-        for k in ['Subsurface Color']:
-            if k in bsdf.inputs:
                 try:
-                    bsdf.inputs[k].default_value = (*subsurface_color, 1.0)
+                    bsdf.inputs[k].default_value = transmission
                 except Exception:
                     pass
+                break
+
+    if subsurface > 0:
+        for k in ['Subsurface Weight', 'Subsurface']:
+            if k in bsdf.inputs:
+                try:
+                    bsdf.inputs[k].default_value = subsurface
+                except Exception:
+                    pass
+                break
+        if subsurface_color:
+            for k in ['Subsurface Color']:
+                if k in bsdf.inputs:
+                    try:
+                        bsdf.inputs[k].default_value = (*subsurface_color, 1.0)
+                    except Exception:
+                        pass
 
     if emission_strength > 0 and emission_color:
         for k in ['Emission Color', 'Emission']:
@@ -119,7 +127,10 @@ def make_mat(name, base_color,
                 break
         for k in ['Emission Strength']:
             if k in bsdf.inputs:
-                bsdf.inputs[k].default_value = emission_strength
+                try:
+                    bsdf.inputs[k].default_value = emission_strength
+                except Exception:
+                    pass
 
     links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     mat_cache[name] = mat
@@ -283,13 +294,11 @@ head = add_sphere('Head', M_SKIN, location=(0, 0, 1.75),
 head.scale = (1.0, 0.88, 1.08)
 add_subsurf(head, levels=2, render_levels=3)
 
-# Neck
 neck = add_cylinder('Neck', M_SKIN, location=(0, 0.02, 1.32),
                     radius=0.12, depth=0.22, verts=24)
 add_subsurf(neck, levels=1, render_levels=2)
 
 # ── EYES ─────────────────────────────────────────────────────
-# Left eye
 eye_l_white = add_sphere('EyeL_Sclera', M_EYE_SCLERA,
                           location=(-0.13, -0.30, 1.82),
                           radius=0.065, segments=32, rings=16)
@@ -305,7 +314,6 @@ eye_l_pupil = add_sphere('EyeL_Pupil', M_EYE_PUPIL,
                           radius=0.025, segments=16, rings=8)
 eye_l_pupil.scale = (1.0, 0.2, 0.8)
 
-# Right eye
 eye_r_white = add_sphere('EyeR_Sclera', M_EYE_SCLERA,
                           location=(0.13, -0.30, 1.82),
                           radius=0.065, segments=32, rings=16)
@@ -360,7 +368,6 @@ ear_r = add_sphere('EarR', M_SKIN,
                     radius=0.07, segments=16, rings=8)
 ear_r.scale = (0.4, 0.25, 0.65)
 
-# Earring stud (left)
 earring = add_sphere('Earring', M_EARRING,
                       location=(-0.395, 0.02, 1.73),
                       radius=0.018, segments=12, rings=6)
@@ -382,7 +389,6 @@ brim.rotation_euler = (math.radians(15), 0, 0)
 assign_mat(brim, M_CAP_BRIM)
 smooth_shade(brim)
 
-# Checkmark logo
 check_l = add_cube('CheckL', M_CHECK,
                     location=(-0.06, -0.37, 2.02),
                     scale=(0.055, 0.008, 0.022),
@@ -420,7 +426,6 @@ assign_mat(shirt, M_SHIRT_GREEN)
 smooth_shade(shirt)
 add_subsurf(shirt, levels=1, render_levels=2)
 
-# Collar
 collar_l = add_cube('CollarL', M_SHIRT_GREEN,
                      location=(-0.10, -0.28, 1.38),
                      scale=(0.08, 0.02, 0.12),
@@ -431,7 +436,6 @@ collar_r = add_cube('CollarR', M_SHIRT_GREEN,
                      scale=(0.08, 0.02, 0.12),
                      rotation=(math.radians(-25), 0, math.radians(-15)))
 
-# Buttons
 for i, bz in enumerate([1.18, 1.08, 0.98]):
     add_sphere(f'Button_{i}', M_SHIRT_WHITE,
                location=(0, -0.335, bz),
@@ -563,7 +567,6 @@ mat_floor = make_mat('Floor', (0.02, 0.02, 0.03),
                      roughness=0.2, metallic=0.0)
 assign_mat(floor, mat_floor)
 
-# Bokeh city lights
 bokeh_positions = [
     (-1.5, 3.5, 2.8, (1.0, 0.75, 0.35), 0.12),
     ( 1.8, 4.0, 2.2, (1.0, 0.80, 0.40), 0.10),
@@ -582,11 +585,10 @@ for i, (bx, by, bz, bc, br) in enumerate(bokeh_positions):
                            radius=br, segments=8, rings=4)
 
 # ============================================================
-# LIGHTING — Cinematic Urban Night
+# LIGHTING
 # ============================================================
 print("Setting up lights...")
 
-# Key Light — warm front-right
 bpy.ops.object.light_add(type='AREA', location=(1.8, -2.5, 3.2))
 key = bpy.context.active_object
 key.name = "KeyLight"
@@ -596,7 +598,6 @@ key.data.color  = (1.0, 0.88, 0.72)
 key.rotation_euler = (
     math.radians(50), math.radians(20), math.radians(-35))
 
-# Rim Light — cool blue
 bpy.ops.object.light_add(type='AREA', location=(-2.0, 1.5, 2.8))
 rim = bpy.context.active_object
 rim.name = "RimLight"
@@ -606,7 +607,6 @@ rim.data.color  = (0.45, 0.55, 1.0)
 rim.rotation_euler = (
     math.radians(55), math.radians(-25), math.radians(145))
 
-# Fill Light
 bpy.ops.object.light_add(type='AREA', location=(0.0, -3.5, 1.5))
 fill = bpy.context.active_object
 fill.name = "FillLight"
@@ -614,7 +614,6 @@ fill.data.energy = 30
 fill.data.size   = 3.5
 fill.data.color  = (0.70, 0.75, 0.95)
 
-# Top Light
 bpy.ops.object.light_add(type='AREA', location=(0.2, -0.5, 4.0))
 top_l = bpy.context.active_object
 top_l.name = "TopLight"
@@ -623,7 +622,6 @@ top_l.data.size   = 1.5
 top_l.data.color  = (1.0, 0.95, 0.85)
 top_l.rotation_euler = (math.radians(90), 0, 0)
 
-# Flame practical light
 bpy.ops.object.light_add(type='POINT', location=(0.34, -0.32, 0.72))
 flame_light = bpy.context.active_object
 flame_light.name = "FlamePractical"
@@ -631,7 +629,6 @@ flame_light.data.energy = 12
 flame_light.data.color  = (1.0, 0.55, 0.08)
 flame_light.data.shadow_soft_size = 0.05
 
-# Cigarette glow
 bpy.ops.object.light_add(type='POINT', location=(0.04, -0.375, 1.648))
 cig_light = bpy.context.active_object
 cig_light.name = "CigGlow"
@@ -640,7 +637,7 @@ cig_light.data.color  = (1.0, 0.45, 0.05)
 cig_light.data.shadow_soft_size = 0.02
 
 # ============================================================
-# CAMERA — 85mm portrait, f/1.8
+# CAMERA
 # ============================================================
 print("Setting up camera...")
 
@@ -686,19 +683,30 @@ scene.render.image_settings.file_format = 'PNG'
 scene.render.image_settings.color_mode  = 'RGBA'
 scene.render.image_settings.compression = 10
 
+# Tile size (3.x only — ignored safely in newer versions)
 try:
     scene.cycles.tile_x = 128
     scene.cycles.tile_y = 128
 except AttributeError:
     pass
 
+# ── Color management — SAFE for 3.6 ─────────────────────────
 scene.view_settings.view_transform = 'Filmic'
-try:
-    scene.view_settings.look = 'High Contrast'
-except Exception:
-    pass
 scene.view_settings.exposure = 0.2
 scene.view_settings.gamma    = 1.0
+
+# Safe look setter — only apply if the look actually exists
+available_looks = [l.name for l in bpy.types.ColorManagedViewSettings.bl_rna.properties['look'].enum_items]
+desired_look = 'High Contrast'
+if desired_look in available_looks:
+    scene.view_settings.look = desired_look
+else:
+    # Fallback: use whatever is available
+    for fallback in ['Medium High Contrast', 'Medium Contrast', 'None']:
+        if fallback in available_looks:
+            scene.view_settings.look = fallback
+            print(f"Color look: using '{fallback}' instead of '{desired_look}'")
+            break
 
 world = bpy.data.worlds.get("World") or bpy.data.worlds.new("World")
 scene.world = world
@@ -709,7 +717,7 @@ if bg_node:
     bg_node.inputs['Strength'].default_value = 0.3
 
 # ============================================================
-# COMPOSITOR — Bloom + Vignette + Color Grade
+# COMPOSITOR
 # ============================================================
 print("Setting up compositor...")
 
@@ -718,7 +726,7 @@ comp_tree  = scene.node_tree
 comp_nodes = comp_tree.nodes
 comp_links = comp_tree.links
 
-for n in comp_nodes:
+for n in list(comp_nodes):
     comp_nodes.remove(n)
 
 rl = comp_nodes.new('CompositorNodeRLayers')
@@ -732,10 +740,18 @@ glare.threshold  = 0.85
 glare.size       = 7
 comp_links.new(rl.outputs['Image'], glare.inputs['Image'])
 
+# ── Lens distortion — index-safe for 3.6 ────────────────────
 lens = comp_nodes.new('CompositorNodeLensdist')
 lens.location = (150, 0)
-lens.inputs['Distort'].default_value    = -0.015
-lens.inputs['Dispersion'].default_value = 0.004
+try:
+    lens.inputs['Distort'].default_value    = -0.015
+    lens.inputs['Dispersion'].default_value = 0.004
+except (KeyError, IndexError):
+    try:
+        lens.inputs[1].default_value = -0.015
+        lens.inputs[2].default_value = 0.004
+    except Exception:
+        pass
 comp_links.new(glare.outputs['Image'], lens.inputs['Image'])
 
 cb = comp_nodes.new('CompositorNodeColorBalance')
@@ -795,32 +811,31 @@ try:
     )
     print("GLB exported")
 except Exception as e:
-    print(f"GLB export failed: {e}")
+    print(f"GLB export failed (non-fatal): {e}")
 
 # ============================================================
-# EXPORT USDZ (iPhone AR)
+# EXPORT USDZ
 # ============================================================
 print(f"Exporting USDZ: {OUTPUT_USDZ}")
 usdz_ok = False
 
 try:
+    # Blender 3.6 usd_export compatible parameters only
     bpy.ops.wm.usd_export(
         filepath=OUTPUT_USDZ,
         selected_objects_only=False,
         visible_objects_only=True,
         export_animation=False,
-        export_hair=False,
         export_uvmaps=True,
         export_normals=True,
         export_materials=True,
-        use_instancing=False,
         evaluation_mode='RENDER',
     )
     if os.path.exists(OUTPUT_USDZ) and os.path.getsize(OUTPUT_USDZ) > 0:
         usdz_ok = True
         print(f"USDZ exported: {OUTPUT_USDZ}")
 except Exception as e:
-    print(f"USDZ export failed: {e}")
+    print(f"USDZ export attempt 1 failed: {e}")
 
 if not usdz_ok:
     try:
@@ -834,7 +849,7 @@ if not usdz_ok:
             zf.write(usdc_path, os.path.basename(usdc_path))
         print(f"USDZ packaged via zip: {OUTPUT_USDZ}")
     except Exception as e2:
-        print(f"USDZ fallback failed: {e2}")
+        print(f"USDZ fallback failed (non-fatal): {e2}")
 
 # ============================================================
 # RENDER PNG
