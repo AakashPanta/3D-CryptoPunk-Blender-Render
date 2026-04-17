@@ -1,0 +1,176 @@
+name: 🎨 3D CryptoPunk Blender Render
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger button
+
+env:
+  BLENDER_VERSION: "4.1.1"
+  BLENDER_MAJOR: "4.1"
+
+jobs:
+  render:
+    name: 🖥️ Build & Render 3D Scene
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ──────────────────────────────────────
+      # 1. Checkout repository
+      # ──────────────────────────────────────
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      # ──────────────────────────────────────
+      # 2. Cache Blender installation
+      # ──────────────────────────────────────
+      - name: 💾 Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      # ──────────────────────────────────────
+      # 3. Install Blender
+      # ──────────────────────────────────────
+      - name: 📦 Download & Install Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          echo "🔽 Downloading Blender ${{ env.BLENDER_VERSION }}..."
+          
+          BLENDER_TAR="blender-${{ env.BLENDER_VERSION }}-linux-x64.tar.xz"
+          BLENDER_URL="https://download.blender.org/release/Blender${{ env.BLENDER_MAJOR }}/${BLENDER_TAR}"
+          
+          mkdir -p ~/blender
+          
+          wget -q --show-progress "${BLENDER_URL}" -O /tmp/blender.tar.xz
+          
+          echo "📂 Extracting Blender..."
+          tar -xf /tmp/blender.tar.xz -C ~/blender --strip-components=1
+          
+          rm /tmp/blender.tar.xz
+          echo "✅ Blender installed successfully"
+
+      # ──────────────────────────────────────
+      # 4. Verify Blender installation
+      # ──────────────────────────────────────
+      - name: ✅ Verify Blender
+        run: |
+          export PATH="$HOME/blender:$PATH"
+          blender --version
+          echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
+
+      # ──────────────────────────────────────
+      # 5. Install system dependencies
+      # ──────────────────────────────────────
+      - name: 🔧 Install System Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libxi6 \
+            libxxf86vm1 \
+            libxfixes3 \
+            libxrender1 \
+            libgl1-mesa-glx \
+            libgl1-mesa-dri \
+            libegl1-mesa \
+            xvfb \
+            > /dev/null 2>&1
+          echo "✅ Dependencies installed"
+
+      # ──────────────────────────────────────
+      # 6. Create output directory
+      # ──────────────────────────────────────
+      - name: 📁 Prepare Output Directory
+        run: mkdir -p output
+
+      # ──────────────────────────────────────
+      # 7. Run Blender render (headless)
+      # ──────────────────────────────────────
+      - name: 🎬 Render 3D Scene
+        run: |
+          echo "🎨 Starting Blender headless render..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          xvfb-run -a ${{ env.BLENDER_PATH }} \
+            --background \
+            --factory-startup \
+            --python scripts/cryptopunk_3d.py \
+            -- \
+            --output-dir "${{ github.workspace }}/output"
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Render complete!"
+          
+          # List output files
+          echo "📦 Output files:"
+          ls -lah output/
+
+      # ──────────────────────────────────────
+      # 8. Verify render output exists
+      # ──────────────────────────────────────
+      - name: 🔍 Verify Render Output
+        run: |
+          if [ -f "output/cryptopunk_3d_render.png" ]; then
+            echo "✅ Render file found!"
+            FILE_SIZE=$(stat -c%s "output/cryptopunk_3d_render.png")
+            echo "📐 File size: $(numfmt --to=iec-i --suffix=B $FILE_SIZE)"
+          else
+            echo "❌ Render file not found!"
+            echo "📂 Contents of output/:"
+            ls -la output/ || echo "  (empty)"
+            exit 1
+          fi
+
+      # ──────────────────────────────────────
+      # 9. Upload render as artifact
+      # ──────────────────────────────────────
+      - name: 📤 Upload Rendered Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptopunk-3d-render
+          path: output/cryptopunk_3d_render.png
+          retention-days: 30
+          if-no-files-found: error
+
+      # ──────────────────────────────────────
+      # 10. Upload full scene .blend file
+      # ──────────────────────────────────────
+      - name: 📤 Upload Blender Scene File
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptopunk-3d-blend-file
+          path: output/cryptopunk_scene.blend
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ──────────────────────────────────────
+      # 11. Generate summary
+      # ──────────────────────────────────────
+      - name: 📊 Job Summary
+        if: always()
+        run: |
+          echo "## 🎨 3D CryptoPunk Render Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "output/cryptopunk_3d_render.png" ]; then
+            FILE_SIZE=$(stat -c%s "output/cryptopunk_3d_render.png")
+            READABLE_SIZE=$(numfmt --to=iec-i --suffix=B $FILE_SIZE)
+            
+            echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Blender Version** | ${{ env.BLENDER_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Render Engine** | Cycles (CPU) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Resolution** | 2048 × 2048 |" >> $GITHUB_STEP_SUMMARY
+            echo "| **File Size** | ${READABLE_SIZE} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Samples** | 128 (CI optimized) |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📥 Download the render from the **Artifacts** section above." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
