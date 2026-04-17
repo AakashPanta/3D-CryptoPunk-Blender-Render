@@ -28,25 +28,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-3.6.21-ubuntu22-v1
+          key: blender-3.6.21-ubuntu22-osmesa-v1
 
       - name: Download Blender 3.6 LTS
         if: steps.cache-blender.outputs.cache-hit != 'true'
         run: |
-          echo "Downloading Blender 3.6.21 LTS..."
-          wget -q "https://download.blender.org/release/Blender3.6/blender-3.6.21-linux-x64.tar.xz" \
+          echo "Downloading Blender 3.6.21..."
+          wget -q \
+            "https://download.blender.org/release/Blender3.6/blender-3.6.21-linux-x64.tar.xz" \
             -O /tmp/blender.tar.xz
           mkdir -p ~/blender
           tar -xf /tmp/blender.tar.xz -C ~/blender --strip-components=1
           rm /tmp/blender.tar.xz
-          echo "Done"
+          echo "Blender installed"
 
       - name: Set Blender Path
         run: |
           ~/blender/blender --version
           echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
 
-      - name: Install Dependencies
+      - name: Install All Dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -58,6 +59,7 @@ jobs:
             libxext6 \
             libx11-6 \
             libxkbcommon0 \
+            libxkbcommon-x11-0 \
             libsm6 \
             libice6 \
             libxrandr2 \
@@ -65,19 +67,27 @@ jobs:
             libxinerama1 \
             libgl1 \
             libgl1-mesa-dri \
+            libgl1-mesa-glx \
             libglx-mesa0 \
             libegl1 \
+            libegl1-mesa \
             libegl-mesa0 \
+            libgles2 \
             libglib2.0-0 \
             libgomp1 \
             libosmesa6 \
             mesa-utils \
+            freeglut3 \
+            libglu1-mesa \
             || true
 
-      - name: Verify Script Exists
+          echo "Installed packages"
+          dpkg -l | grep -E "mesa|osmesa|egl" | awk '{print $2, $3}' || true
+
+      - name: Verify Script
         run: |
           if [ -f "${{ env.SCRIPT_PATH }}" ]; then
-            echo "Script found: $(wc -l < ${{ env.SCRIPT_PATH }}) lines"
+            echo "Script OK — $(wc -l < ${{ env.SCRIPT_PATH }}) lines"
           else
             echo "ERROR: Script not found"
             find . -name "*.py" | grep -v ".git"
@@ -87,39 +97,50 @@ jobs:
       - name: Prepare Output Directory
         run: mkdir -p output
 
-      - name: Start Xvfb
+      # ── KEY STEP: test with full env dump ──────────────────
+      - name: Test Blender Environment
         run: |
-          pkill Xvfb || true
-          sleep 1
-          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-          sleep 4
-          echo "DISPLAY=:99" >> $GITHUB_ENV
-          echo "Xvfb started"
+          echo "=== System GL Info ==="
+          ls -la /usr/lib/x86_64-linux-gnu/libGL* 2>/dev/null || true
+          ls -la /usr/lib/x86_64-linux-gnu/libOSMesa* 2>/dev/null || true
+          ls -la /usr/lib/x86_64-linux-gnu/mesa/ 2>/dev/null || true
+          echo ""
 
-      - name: Test Blender Starts
-        run: |
-          DISPLAY=:99 \
+          echo "=== Testing Blender --background only ==="
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
+          LIBGL_DEBUG=verbose \
           ${{ env.BLENDER_PATH }} \
             --background \
             --factory-startup \
             --python-exit-code 1 \
-            --python-expr "import bpy; print('BLENDER OK version=' + bpy.app.version_string)" \
-            2>&1 | tee /tmp/blender_test.log
-          echo "--- Test log ---"
+            --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
+            2>&1 | tee /tmp/blender_test.log || true
+
+          echo ""
+          echo "=== Full test log ==="
           cat /tmp/blender_test.log
-          grep -q "BLENDER OK" /tmp/blender_test.log && echo "Blender works" || exit 1
+
+          echo ""
+          echo "=== Checking result ==="
+          if grep -q "BLENDER_OK" /tmp/blender_test.log; then
+            echo "SUCCESS: Blender Python works"
+          else
+            echo "FAILED: Blender Python did not start"
+            echo "Last 20 lines:"
+            tail -20 /tmp/blender_test.log
+          fi
 
       - name: Run Blender Pipeline
         timeout-minutes: 70
         run: |
-          echo "Starting render..."
-          DISPLAY=:99 \
+          echo "Starting render pipeline..."
+
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
+          MESA_GLSL_VERSION_OVERRIDE=330 \
           LP_NUM_THREADS=4 \
           ${{ env.BLENDER_PATH }} \
             --background \
@@ -129,25 +150,34 @@ jobs:
             -- \
             --output-dir "${{ github.workspace }}/output" \
             2>&1 | tee /tmp/blender_output.log
-          BLENDER_EXIT=${PIPESTATUS[0]}
-          echo "Exit code: ${BLENDER_EXIT}"
-          tail -100 /tmp/blender_output.log || true
-          ls -lah "${{ github.workspace }}/output/" || true
-          exit ${BLENDER_EXIT}
 
-      - name: Stop Xvfb
-        if: always()
-        run: pkill Xvfb 2>/dev/null || true
+          BLENDER_EXIT=${PIPESTATUS[0]}
+
+          echo "Exit code: ${BLENDER_EXIT}"
+          echo ""
+          echo "=== Last 100 lines ==="
+          tail -100 /tmp/blender_output.log || true
+          echo ""
+          echo "=== Output files ==="
+          ls -lah "${{ github.workspace }}/output/" || true
+
+          exit ${BLENDER_EXIT}
 
       - name: Verify Output Files
         run: |
           ls -lah output/ || true
           RENDER_OK=false
-          [ -f "output/cryptopunk_character_render.png" ] && RENDER_OK=true && echo "PNG: OK" || echo "PNG: MISSING"
-          [ -f "output/cryptopunk_character.blend" ] && echo "BLEND: OK" || echo "BLEND: not generated"
-          [ -f "output/cryptopunk_character.usdz" ] && echo "USDZ: OK" || echo "USDZ: not generated"
-          [ -f "output/cryptopunk_character.glb" ] && echo "GLB: OK" || echo "GLB: not generated"
-          [ "$RENDER_OK" = false ] && echo "FATAL: PNG missing" && exit 1
+          [ -f "output/cryptopunk_character_render.png" ] \
+            && RENDER_OK=true && echo "PNG:   OK" \
+            || echo "PNG:   MISSING"
+          [ -f "output/cryptopunk_character.blend" ] \
+            && echo "BLEND: OK" || echo "BLEND: not generated"
+          [ -f "output/cryptopunk_character.usdz" ] \
+            && echo "USDZ:  OK" || echo "USDZ:  not generated"
+          [ -f "output/cryptopunk_character.glb" ] \
+            && echo "GLB:   OK" || echo "GLB:   not generated"
+          [ "$RENDER_OK" = false ] \
+            && echo "FATAL: PNG missing" && exit 1
           echo "SUCCESS"
 
       - name: Upload Debug Log
