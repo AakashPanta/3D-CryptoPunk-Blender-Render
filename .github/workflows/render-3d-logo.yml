@@ -16,114 +16,293 @@ jobs:
   render:
     name: Build and Render 3D Character
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
 
+      # ─────────────────────────────────────────────────────
+      # 1. CHECKOUT
+      # ─────────────────────────────────────────────────────
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # ─────────────────────────────────────────────────────
+      # 2. CACHE BLENDER
+      # ─────────────────────────────────────────────────────
       - name: Cache Blender Installation
         id: cache-blender
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-v1
+          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-v2
 
+      # ─────────────────────────────────────────────────────
+      # 3. DOWNLOAD BLENDER
+      # ─────────────────────────────────────────────────────
       - name: Download and Install Blender
         if: steps.cache-blender.outputs.cache-hit != 'true'
         run: |
-          echo "Downloading Blender ${{ env.BLENDER_VERSION }}..."
+          echo "================================================"
+          echo "  Downloading Blender ${{ env.BLENDER_VERSION }}"
+          echo "================================================"
+
           BLENDER_TAR="blender-${{ env.BLENDER_VERSION }}-linux-x64.tar.xz"
           BLENDER_URL="https://download.blender.org/release/Blender${{ env.BLENDER_MAJOR }}/${BLENDER_TAR}"
+
+          echo "URL: ${BLENDER_URL}"
           mkdir -p ~/blender
-          wget -q "${BLENDER_URL}" -O /tmp/blender.tar.xz
-          echo "Extracting..."
+
+          wget -q --show-progress "${BLENDER_URL}" -O /tmp/blender.tar.xz
+
+          echo "Extracting Blender..."
           tar -xf /tmp/blender.tar.xz -C ~/blender --strip-components=1
           rm /tmp/blender.tar.xz
-          echo "Blender installed"
 
+          echo "Blender installed successfully"
+          ~/blender/blender --version
+
+      # ─────────────────────────────────────────────────────
+      # 4. VERIFY BLENDER
+      # ─────────────────────────────────────────────────────
       - name: Verify Blender
         run: |
+          echo "Blender version:"
           ~/blender/blender --version
           echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
+          echo "Blender path: $HOME/blender/blender"
 
+      # ─────────────────────────────────────────────────────
+      # 5. INSTALL SYSTEM DEPENDENCIES
+      # ─────────────────────────────────────────────────────
       - name: Install System Dependencies
         run: |
+          echo "Updating apt..."
           sudo apt-get update -y
+
+          echo "Installing display and OpenGL libraries..."
           sudo apt-get install -y \
+            xvfb \
+            x11-utils \
             libxi6 \
             libxxf86vm1 \
             libxfixes3 \
             libxrender1 \
-            libgl1-mesa-glx \
-            libgl1-mesa-dri \
-            libegl1-mesa \
-            libgl1 \
-            libglx-mesa0 \
-            libegl-mesa0 \
-            libegl1 \
-            libgles2 \
-            xvfb \
+            libxext6 \
+            libx11-6 \
             libxkbcommon0 \
+            libxkbcommon-x11-0 \
             libsm6 \
+            libice6 \
             libxrandr2 \
             libxcursor1 \
             libxinerama1 \
+            libgl1 \
+            libgl1-mesa-dri \
+            libglx-mesa0 \
+            libegl1 \
+            libegl1-mesa \
+            libegl-mesa0 \
+            libgles2 \
+            libglib2.0-0 \
+            libgomp1 \
+            libffi8 \
+            libssl3 \
+            libjpeg8 \
+            libpng16-16 \
+            libtiff5 \
+            libopenjp2-7 \
+            libwebp7 \
             || true
-          echo "Dependencies installed"
 
+          echo "All dependencies installed"
+
+          # Verify Xvfb is available
+          which Xvfb && echo "Xvfb found" || echo "WARNING: Xvfb not found"
+
+      # ─────────────────────────────────────────────────────
+      # 6. VERIFY SCRIPT FILE
+      # ─────────────────────────────────────────────────────
       - name: Verify Script File
         run: |
+          echo "Checking script path: ${{ env.SCRIPT_PATH }}"
+
           if [ -f "${{ env.SCRIPT_PATH }}" ]; then
-            echo "Script found: ${{ env.SCRIPT_PATH }}"
+            echo "Script found"
+            echo "Size:  $(du -sh ${{ env.SCRIPT_PATH }} | cut -f1)"
             echo "Lines: $(wc -l < ${{ env.SCRIPT_PATH }})"
+            echo "First line: $(head -1 ${{ env.SCRIPT_PATH }})"
           else
-            echo "ERROR: Script not found!"
-            find . -name "*.py" | head -20
+            echo "ERROR: Script not found at ${{ env.SCRIPT_PATH }}"
+            echo ""
+            echo "Repository structure:"
+            find . -type f | grep -v ".git" | sort
             exit 1
           fi
 
+      # ─────────────────────────────────────────────────────
+      # 7. PREPARE OUTPUT DIRECTORY
+      # ─────────────────────────────────────────────────────
       - name: Prepare Output Directory
-        run: mkdir -p output
-
-      - name: Run Blender Pipeline
-        timeout-minutes: 45
         run: |
-          echo "Starting Blender headless pipeline..."
-          xvfb-run -a -s "-screen 0 1920x1080x24" \
-            ${{ env.BLENDER_PATH }} \
-              --background \
-              --factory-startup \
-              --python ${{ env.SCRIPT_PATH }} \
-              -- \
-              --output-dir "${{ github.workspace }}/output"
-          echo "Blender pipeline finished"
-          echo "Output files:"
-          ls -lah output/ 2>/dev/null || echo "(empty)"
+          mkdir -p output
+          echo "Output directory: $(pwd)/output"
+          ls -la output/
 
+      # ─────────────────────────────────────────────────────
+      # 8. START XVFB VIRTUAL DISPLAY
+      # ─────────────────────────────────────────────────────
+      - name: Start Xvfb Virtual Display
+        run: |
+          echo "Starting Xvfb virtual display..."
+
+          # Kill any existing Xvfb on :99
+          pkill Xvfb || true
+          sleep 1
+
+          # Start fresh Xvfb
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          XVFB_PID=$!
+
+          echo "XVFB_PID=${XVFB_PID}" >> $GITHUB_ENV
+          echo "DISPLAY=:99"          >> $GITHUB_ENV
+
+          # Wait for display to be ready
+          sleep 4
+
+          # Verify display is running
+          if kill -0 $XVFB_PID 2>/dev/null; then
+            echo "Xvfb running (PID: ${XVFB_PID})"
+          else
+            echo "ERROR: Xvfb failed to start"
+            exit 1
+          fi
+
+          # Test display
+          DISPLAY=:99 xdpyinfo > /dev/null 2>&1 \
+            && echo "Display :99 is responsive" \
+            || echo "WARNING: xdpyinfo check failed (non-fatal)"
+
+      # ─────────────────────────────────────────────────────
+      # 9. RUN BLENDER PIPELINE
+      # ─────────────────────────────────────────────────────
+      - name: Run Blender Pipeline
+        timeout-minutes: 60
+        run: |
+          echo "================================================"
+          echo "  Starting Blender Headless Pipeline"
+          echo "  Script:  ${{ env.SCRIPT_PATH }}"
+          echo "  Output:  ${{ github.workspace }}/output"
+          echo "  Display: $DISPLAY"
+          echo "================================================"
+
+          # Run Blender — capture ALL output to log AND console
+          DISPLAY=:99 ${{ env.BLENDER_PATH }} \
+            --background \
+            --factory-startup \
+            --python "${{ env.SCRIPT_PATH }}" \
+            -- \
+            --output-dir "${{ github.workspace }}/output" \
+            2>&1 | tee /tmp/blender_output.log
+
+          BLENDER_EXIT=${PIPESTATUS[0]}
+
+          echo "================================================"
+          echo "  Blender exit code: ${BLENDER_EXIT}"
+          echo "================================================"
+
+          # Always show last 80 lines of output for debugging
+          echo ""
+          echo "--- Blender output (last 80 lines) ---"
+          tail -80 /tmp/blender_output.log || true
+
+          echo ""
+          echo "--- Output directory after run ---"
+          ls -lah "${{ github.workspace }}/output/" 2>/dev/null || echo "(empty)"
+
+          exit ${BLENDER_EXIT}
+
+      # ─────────────────────────────────────────────────────
+      # 10. STOP XVFB
+      # ─────────────────────────────────────────────────────
+      - name: Stop Xvfb
+        if: always()
+        run: |
+          if [ -n "$XVFB_PID" ]; then
+            kill $XVFB_PID 2>/dev/null || true
+            echo "Xvfb stopped"
+          fi
+          pkill Xvfb 2>/dev/null || true
+
+      # ─────────────────────────────────────────────────────
+      # 11. VERIFY OUTPUT FILES
+      # ─────────────────────────────────────────────────────
       - name: Verify Output Files
         run: |
-          if [ -f "output/cryptopunk_character_render.png" ]; then
-            SZ=$(stat -c%s "output/cryptopunk_character_render.png")
-            echo "PNG render OK: $(numfmt --to=iec-i --suffix=B $SZ)"
+          echo "================================================"
+          echo "  Verifying output files"
+          echo "================================================"
+
+          echo "Full output directory listing:"
+          ls -lah "${{ github.workspace }}/output/" 2>/dev/null || echo "(empty)"
+          echo ""
+
+          RENDER_OK=false
+
+          # Check PNG render (REQUIRED)
+          if [ -f "${{ github.workspace }}/output/cryptopunk_character_render.png" ]; then
+            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character_render.png")
+            echo "  PNG Render:    OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
+            RENDER_OK=true
           else
-            echo "ERROR: PNG render not found!"
-            ls -la output/ || true
+            echo "  PNG Render:    MISSING"
+          fi
+
+          # Check .blend
+          if [ -f "${{ github.workspace }}/output/cryptopunk_character.blend" ]; then
+            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character.blend")
+            echo "  Blender Scene: OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
+          else
+            echo "  Blender Scene: not generated"
+          fi
+
+          # Check USDZ
+          if [ -f "${{ github.workspace }}/output/cryptopunk_character.usdz" ]; then
+            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character.usdz")
+            echo "  USDZ iPhone:   OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
+          else
+            echo "  USDZ iPhone:   not generated"
+          fi
+
+          # Check GLB
+          if [ -f "${{ github.workspace }}/output/cryptopunk_character.glb" ]; then
+            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character.glb")
+            echo "  GLB Web:       OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
+          else
+            echo "  GLB Web:       not generated"
+          fi
+
+          echo "================================================"
+
+          if [ "$RENDER_OK" = false ]; then
+            echo "FATAL: PNG render was not produced"
+            echo "Check the blender-debug-log artifact for details"
             exit 1
           fi
 
-          for f in \
-            "output/cryptopunk_character.blend" \
-            "output/cryptopunk_character.usdz" \
-            "output/cryptopunk_character.glb"; do
-            if [ -f "$f" ]; then
-              SZ=$(stat -c%s "$f")
-              echo "OK: $f ($(numfmt --to=iec-i --suffix=B $SZ))"
-            else
-              echo "WARNING: $f not generated"
-            fi
-          done
+          echo "Pipeline completed successfully"
+
+      # ─────────────────────────────────────────────────────
+      # 12. UPLOAD ARTIFACTS
+      # ─────────────────────────────────────────────────────
+
+      - name: Upload Blender Debug Log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blender-debug-log
+          path: /tmp/blender_output.log
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload PNG Render
         uses: actions/upload-artifact@v4
@@ -132,7 +311,7 @@ jobs:
           name: character-render-PNG
           path: output/cryptopunk_character_render.png
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload Blender Scene
         uses: actions/upload-artifact@v4
@@ -170,10 +349,13 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      # ─────────────────────────────────────────────────────
+      # 13. JOB SUMMARY
+      # ─────────────────────────────────────────────────────
       - name: Job Summary
         if: always()
         run: |
-          echo "## 3D CryptoPunk Character — Results" >> $GITHUB_STEP_SUMMARY
+          echo "## 3D CryptoPunk Character — Pipeline Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| File | Format | Status | Size |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|--------|------|" >> $GITHUB_STEP_SUMMARY
@@ -183,9 +365,11 @@ jobs:
             "Blender Scene:BLEND:output/cryptopunk_character.blend" \
             "iPhone AR:USDZ:output/cryptopunk_character.usdz" \
             "Web 3D:GLB:output/cryptopunk_character.glb"; do
-            LABEL=$(echo "$entry" | cut -d: -f1)
+
+            LABEL=$(echo "$entry"  | cut -d: -f1)
             FORMAT=$(echo "$entry" | cut -d: -f2)
-            FILE=$(echo "$entry" | cut -d: -f3)
+            FILE=$(echo "$entry"   | cut -d: -f3)
+
             if [ -f "$FILE" ] && [ -s "$FILE" ]; then
               SZ=$(numfmt --to=iec-i --suffix=B $(stat -c%s "$FILE"))
               echo "| **${LABEL}** | ${FORMAT} | Ready | ${SZ} |" >> $GITHUB_STEP_SUMMARY
@@ -204,9 +388,15 @@ jobs:
           echo "| Samples | 256 + OIDN Denoiser |" >> $GITHUB_STEP_SUMMARY
           echo "| Camera | 85mm f/1.8 Portrait |" >> $GITHUB_STEP_SUMMARY
           echo "| Post FX | Bloom + Vignette + Color Grade |" >> $GITHUB_STEP_SUMMARY
+          echo "| Runner | ubuntu-22.04 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### iPhone AR Instructions" >> $GITHUB_STEP_SUMMARY
           echo "1. Download **character-iPhone-AR-USDZ** from Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "2. AirDrop or iCloud Drive to iPhone" >> $GITHUB_STEP_SUMMARY
           echo "3. Tap .usdz in Files app" >> $GITHUB_STEP_SUMMARY
           echo "4. Tap AR cube icon to place in your room" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Debug" >> $GITHUB_STEP_SUMMARY
+          echo "If the render failed, download **blender-debug-log** from Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "and check the full Blender output for the exact error." >> $GITHUB_STEP_SUMMARY
