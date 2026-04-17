@@ -26,14 +26,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-${{ env.BLENDER_VERSION }}-linux-x64-v2
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64-v3
 
       - name: Download and Install Blender
         if: steps.cache-blender.outputs.cache-hit != 'true'
         run: |
-          echo "========================================="
-          echo "  Downloading Blender ${{ env.BLENDER_VERSION }}"
-          echo "========================================="
+          echo "Downloading Blender ${{ env.BLENDER_VERSION }}..."
           BLENDER_TAR="blender-${{ env.BLENDER_VERSION }}-linux-x64.tar.xz"
           BLENDER_URL="https://download.blender.org/release/Blender${{ env.BLENDER_MAJOR }}/${BLENDER_TAR}"
           mkdir -p ~/blender
@@ -72,17 +70,23 @@ jobs:
             libxrandr2 \
             libxcursor1 \
             libxinerama1 \
+            python3-pip \
             || true
-          echo "Dependencies installed"
+          echo "All dependencies installed"
+
+      - name: Install Python USD Tools
+        run: |
+          pip3 install usd-core --quiet || true
+          echo "USD tools ready"
 
       - name: Prepare Output Directory
         run: mkdir -p output
 
-      - name: Render 3D Scene
-        timeout-minutes: 30
+      - name: Build Scene + Render + Export USDZ
+        timeout-minutes: 35
         run: |
           echo "========================================="
-          echo "  Starting Blender Headless Render"
+          echo "  Starting Blender Build + Render + USDZ"
           echo "========================================="
           xvfb-run -a -s "-screen 0 1920x1080x24" \
             ${{ env.BLENDER_PATH }} \
@@ -92,27 +96,48 @@ jobs:
             -- \
             --output-dir "${{ github.workspace }}/output"
           echo "========================================="
-          echo "  Render step finished"
+          echo "  All exports finished"
           echo "========================================="
           echo "Output files:"
           ls -lah output/
 
-      - name: Verify Render Output
+      - name: Verify All Output Files
         run: |
+          echo "Checking output files..."
+          ALL_OK=true
+
           if [ -f "output/cryptopunk_3d_render.png" ]; then
-            FILE_SIZE=$(stat -c%s "output/cryptopunk_3d_render.png")
-            echo "Render found! Size: $(numfmt --to=iec-i --suffix=B $FILE_SIZE)"
+            SIZE=$(stat -c%s "output/cryptopunk_3d_render.png")
+            echo "PNG render:  $(numfmt --to=iec-i --suffix=B $SIZE)"
           else
-            echo "ERROR: Render file not found!"
-            echo "Contents of output/:"
-            ls -la output/ || echo "  (directory empty or missing)"
+            echo "ERROR: PNG render not found!"
+            ALL_OK=false
+          fi
+
+          if [ -f "output/cryptopunk_scene.blend" ]; then
+            SIZE=$(stat -c%s "output/cryptopunk_scene.blend")
+            echo "Blend file:  $(numfmt --to=iec-i --suffix=B $SIZE)"
+          else
+            echo "WARNING: .blend file not found"
+          fi
+
+          if [ -f "output/cryptopunk_iphone.usdz" ]; then
+            SIZE=$(stat -c%s "output/cryptopunk_iphone.usdz")
+            echo "USDZ (AR):   $(numfmt --to=iec-i --suffix=B $SIZE)"
+          else
+            echo "WARNING: .usdz file not found (may not be supported on this Blender build)"
+          fi
+
+          if [ "$ALL_OK" = false ]; then
             exit 1
           fi
 
-      - name: Upload Rendered Image
+      # ── ARTIFACTS ──────────────────────────────────────
+
+      - name: Upload PNG Render
         uses: actions/upload-artifact@v4
         with:
-          name: cryptopunk-3d-render
+          name: cryptopunk-3d-render-PNG
           path: output/cryptopunk_3d_render.png
           retention-days: 30
           if-no-files-found: error
@@ -120,29 +145,89 @@ jobs:
       - name: Upload Blender Scene File
         uses: actions/upload-artifact@v4
         with:
-          name: cryptopunk-3d-blend-file
+          name: cryptopunk-blender-scene
           path: output/cryptopunk_scene.blend
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload USDZ for iPhone AR
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptopunk-iphone-AR-usdz
+          path: output/cryptopunk_iphone.usdz
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload USD (fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptopunk-scene-USD
+          path: output/cryptopunk_scene.usdc
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload GLB (Web 3D fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptopunk-scene-GLB
+          path: output/cryptopunk_scene.glb
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── JOB SUMMARY ────────────────────────────────────
+
       - name: Job Summary
         if: always()
         run: |
-          echo "## 3D CryptoPunk Render Results" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎨 3D CryptoPunk Render Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Status | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|------|" >> $GITHUB_STEP_SUMMARY
+
+          # PNG
           if [ -f "output/cryptopunk_3d_render.png" ]; then
-            FILE_SIZE=$(stat -c%s "output/cryptopunk_3d_render.png")
-            READABLE_SIZE=$(numfmt --to=iec-i --suffix=B $FILE_SIZE)
-            echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| **Status** | Success |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Blender** | ${{ env.BLENDER_VERSION }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Engine** | Cycles (CPU) |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Resolution** | 2048 x 2048 |" >> $GITHUB_STEP_SUMMARY
-            echo "| **File Size** | ${READABLE_SIZE} |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Samples** | 128 + Denoiser |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Download from **Artifacts** section above." >> $GITHUB_STEP_SUMMARY
+            SZ=$(numfmt --to=iec-i --suffix=B $(stat -c%s "output/cryptopunk_3d_render.png"))
+            echo "| PNG Render | ✅ Ready | ${SZ} |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| **Status** | Failed |" >> $GITHUB_STEP_SUMMARY
+            echo "| PNG Render | ❌ Failed | - |" >> $GITHUB_STEP_SUMMARY
           fi
+
+          # BLEND
+          if [ -f "output/cryptopunk_scene.blend" ]; then
+            SZ=$(numfmt --to=iec-i --suffix=B $(stat -c%s "output/cryptopunk_scene.blend"))
+            echo "| Blender Scene | ✅ Ready | ${SZ} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Blender Scene | ⚠️ Missing | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # USDZ
+          if [ -f "output/cryptopunk_iphone.usdz" ]; then
+            SZ=$(numfmt --to=iec-i --suffix=B $(stat -c%s "output/cryptopunk_iphone.usdz"))
+            echo "| USDZ (iPhone AR) | ✅ Ready | ${SZ} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| USDZ (iPhone AR) | ⚠️ Missing | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # GLB
+          if [ -f "output/cryptopunk_scene.glb" ]; then
+            SZ=$(numfmt --to=iec-i --suffix=B $(stat -c%s "output/cryptopunk_scene.glb"))
+            echo "| GLB (Web 3D) | ✅ Ready | ${SZ} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| GLB (Web 3D) | ⚠️ Missing | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 How to View on iPhone" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download **cryptopunk-iphone-AR-usdz** from Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "2. AirDrop or iCloud Drive it to your iPhone" >> $GITHUB_STEP_SUMMARY
+          echo "3. Tap the .usdz file in **Files app**" >> $GITHUB_STEP_SUMMARY
+          echo "4. Tap the **AR button** to place it in your room! 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚙️ Render Settings" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Blender | ${{ env.BLENDER_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Engine | Cycles (CPU) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Resolution | 2048 × 2048 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Samples | 128 + Denoiser |" >> $GITHUB_STEP_SUMMARY
+          echo "| Runner | ubuntu-22.04 |" >> $GITHUB_STEP_SUMMARY
