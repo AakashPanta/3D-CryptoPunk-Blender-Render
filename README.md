@@ -1,44 +1,35 @@
-# 🎮 CryptoPunk 3D Voxel Render Pipeline
+# CryptoPunk 3D Voxel Render Pipeline
 
 Automated 3D rendering pipeline using **Blender + GitHub Actions**.
 
-Transforms a pixel art CryptoPunk character into a premium 3D voxel sculpture
-with cinematic lighting, rendered entirely in CI/CD.
+## Output Files
 
-## 🚀 How It Works
+| File | Use |
+|------|-----|
+| `cryptopunk_3d_render.png` | 2048×2048 cinematic render |
+| `cryptopunk_iphone.usdz` | **iPhone AR** — tap in Files app |
+| `cryptopunk_scene.blend` | Edit in Blender desktop |
+| `cryptopunk_scene.glb` | Web 3D viewers, model-viewer |
 
-1. Push to `main` → GitHub Actions triggers
-2. Blender 4.1 is downloaded & cached
-3. Python script builds the 3D scene from scratch
-4. Cycles renders at 2048×2048 with 128 samples
-5. PNG render + `.blend` file uploaded as artifacts
+## How to View on iPhone in AR
 
-## 📥 Get the Render
+1. Download **cryptopunk-iphone-AR-usdz** from Actions > Artifacts
+2. AirDrop or save to iCloud Drive
+3. Tap the `.usdz` file in the **Files app**
+4. Tap the **AR button** (cube icon)
+5. Point camera at floor → your CryptoPunk appears in your room! 🚀
 
-1. Go to **Actions** tab
-2. Click the latest workflow run
-3. Download from **Artifacts** section:
-   - `cryptopunk-3d-render` — Final PNG image
-   - `cryptopunk-3d-blend-file` — Editable Blender file
+## How to Trigger
 
-## 🖱️ Manual Trigger
+- **Auto**: Push to `main`
+- **Manual**: Actions tab → Run workflow
 
-Go to **Actions** → **3D CryptoPunk Blender Render** → **Run workflow**
+## Settings
 
-## 🛠️ Customization
-
-Edit `scripts/cryptopunk_3d.py` to modify:
-- Resolution, samples, camera angle
-- Materials and colors
-- Lighting setup
-- Character pixel map
-
-## ⏱️ Performance
-
-| Setting | Value |
-|---------|-------|
-| Render Engine | Cycles (CPU) |
+| Property | Value |
+|----------|-------|
+| Engine | Cycles (CPU) |
 | Resolution | 2048 × 2048 |
-| Samples | 128 + Denoising |
-| Typical CI Time | ~8-15 minutes |
-| Blender Version | 4.1.1 (cached) |
+| Samples | 128 + Denoiser |
+| Runner | ubuntu-22.04 |
+| Blender | 4.1.1 |
