@@ -23,17 +23,38 @@ jobs:
         shell: bash
         run: |
           set -e
-          test -f "${{ env.SCRIPT_PATH }}"
-          test -f "${{ env.REF_IMAGE }}"
-          echo "Script:    ${{ env.SCRIPT_PATH }}"
-          echo "Reference: ${{ env.REF_IMAGE }}"
+
+          echo "PWD:"
+          pwd
+          echo ""
+
+          echo "Repo root:"
+          ls -lah
+          echo ""
+
+          echo "assets:"
+          ls -lah assets || true
+          echo ""
+
+          echo "scripts:"
+          ls -lah scripts || true
+          echo ""
+
+          echo "Expected script: ${{ env.SCRIPT_PATH }}"
+          echo "Expected ref:    ${{ env.REF_IMAGE }}"
+          echo ""
+
+          [ -f "${{ env.SCRIPT_PATH }}" ] || { echo "Missing script file"; exit 1; }
+          [ -f "${{ env.REF_IMAGE }}" ] || { echo "Missing reference image"; exit 1; }
+
+          echo "All required inputs found."
 
       - name: Cache Blender
         id: cache-blender
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-render-v2
+          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-render-v4
 
       - name: Download Blender
         if: steps.cache-blender.outputs.cache-hit != 'true'
@@ -99,6 +120,7 @@ jobs:
           "$BLENDER_PATH" \
             --background \
             --factory-startup \
+            -noaudio \
             --python-exit-code 1 \
             --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
             2>&1 | tee /tmp/blender_test.log
@@ -117,6 +139,7 @@ jobs:
           "$BLENDER_PATH" \
             --background \
             --factory-startup \
+            -noaudio \
             --python-exit-code 1 \
             --python "${{ env.SCRIPT_PATH }}" \
             -- \
@@ -124,11 +147,18 @@ jobs:
             --reference-image "${{ github.workspace }}/${{ env.REF_IMAGE }}" \
             2>&1 | tee /tmp/blender_output.log
 
+      - name: Show render log tail
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Last 200 lines of blender output ==="
+          tail -n 200 /tmp/blender_output.log || true
+
       - name: Verify outputs
         shell: bash
         run: |
           set -e
-          ls -lah output/
+          ls -lah output/ || true
 
           [ -f "output/character_render.png" ] && echo "PNG OK" || (echo "PNG missing" && exit 1)
           [ -f "output/character_scene.blend" ] && echo "BLEND OK" || echo "BLEND missing"
