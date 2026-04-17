@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 env:
-  BLENDER_VERSION: "4.1.1"
-  BLENDER_MAJOR: "4.1"
+  BLENDER_VERSION: "3.6.21"
+  BLENDER_MAJOR: "3.6"
   SCRIPT_PATH: "scripts/cryptopunk_3d.py"
 
 jobs:
@@ -28,24 +28,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-v7
+          key: blender-3.6.21-ubuntu22-v1
 
-      - name: Download and Install Blender
+      - name: Download Blender 3.6 LTS
         if: steps.cache-blender.outputs.cache-hit != 'true'
         run: |
-          echo "Downloading Blender ${{ env.BLENDER_VERSION }}..."
-          BLENDER_TAR="blender-${{ env.BLENDER_VERSION }}-linux-x64.tar.xz"
-          BLENDER_URL="https://download.blender.org/release/Blender${{ env.BLENDER_MAJOR }}/${BLENDER_TAR}"
+          echo "Downloading Blender 3.6.21 LTS..."
+          wget -q "https://download.blender.org/release/Blender3.6/blender-3.6.21-linux-x64.tar.xz" \
+            -O /tmp/blender.tar.xz
           mkdir -p ~/blender
-          wget -q "${BLENDER_URL}" -O /tmp/blender.tar.xz
           tar -xf /tmp/blender.tar.xz -C ~/blender --strip-components=1
           rm /tmp/blender.tar.xz
-          ~/blender/blender --version
+          echo "Done"
 
       - name: Set Blender Path
-        run: echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
+        run: |
+          ~/blender/blender --version
+          echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
 
-      - name: Install System Dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -69,8 +70,8 @@ jobs:
             libegl-mesa0 \
             libglib2.0-0 \
             libgomp1 \
-            mesa-utils \
             libosmesa6 \
+            mesa-utils \
             || true
 
       - name: Verify Script Exists
@@ -78,7 +79,7 @@ jobs:
           if [ -f "${{ env.SCRIPT_PATH }}" ]; then
             echo "Script found: $(wc -l < ${{ env.SCRIPT_PATH }}) lines"
           else
-            echo "ERROR: ${{ env.SCRIPT_PATH }} not found"
+            echo "ERROR: Script not found"
             find . -name "*.py" | grep -v ".git"
             exit 1
           fi
@@ -91,7 +92,6 @@ jobs:
           pkill Xvfb || true
           sleep 1
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-          echo "XVFB_PID=$!" >> $GITHUB_ENV
           sleep 4
           echo "DISPLAY=:99" >> $GITHUB_ENV
           echo "Xvfb started"
@@ -101,25 +101,25 @@ jobs:
           DISPLAY=:99 \
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
-          MESA_GL_VERSION_OVERRIDE=4.5 \
+          MESA_GL_VERSION_OVERRIDE=3.3 \
           ${{ env.BLENDER_PATH }} \
             --background \
             --factory-startup \
             --python-exit-code 1 \
             --python-expr "import bpy; print('BLENDER OK version=' + bpy.app.version_string)" \
             2>&1 | tee /tmp/blender_test.log
+          echo "--- Test log ---"
           cat /tmp/blender_test.log
           grep -q "BLENDER OK" /tmp/blender_test.log && echo "Blender works" || exit 1
 
       - name: Run Blender Pipeline
         timeout-minutes: 70
         run: |
-          echo "Starting render pipeline..."
+          echo "Starting render..."
           DISPLAY=:99 \
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
-          MESA_GL_VERSION_OVERRIDE=4.5 \
-          MESA_GLSL_VERSION_OVERRIDE=450 \
+          MESA_GL_VERSION_OVERRIDE=3.3 \
           LP_NUM_THREADS=4 \
           ${{ env.BLENDER_PATH }} \
             --background \
@@ -212,20 +212,3 @@ jobs:
           path: output/
           retention-days: 30
           if-no-files-found: warn
-
-      - name: Job Summary
-        if: always()
-        run: |
-          echo "## CryptoPunk Render Results" >> $GITHUB_STEP_SUMMARY
-          echo "| File | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          for f in \
-            "PNG:output/cryptopunk_character_render.png" \
-            "BLEND:output/cryptopunk_character.blend" \
-            "USDZ:output/cryptopunk_character.usdz" \
-            "GLB:output/cryptopunk_character.glb"; do
-            LABEL=$(echo "$f" | cut -d: -f1)
-            FILE=$(echo "$f" | cut -d: -f2)
-            [ -f "$FILE" ] && STATUS="Ready" || STATUS="Not generated"
-            echo "| $LABEL | $STATUS |" >> $GITHUB_STEP_SUMMARY
-          done
