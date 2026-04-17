@@ -1,67 +1,101 @@
 import bpy
-import os
 import math
+import os
+import sys
 import traceback
 from mathutils import Vector, Euler
 
 # ============================================================
-# GLOBALS / PATHS
+# ARGUMENTS
 # ============================================================
-OUTPUT_DIR = os.path.abspath("output")
-PNG_PATH = os.path.join(OUTPUT_DIR, "cryptopunk_character_render.png")
-BLEND_PATH = os.path.join(OUTPUT_DIR, "cryptopunk_character.blend")
-GLB_PATH = os.path.join(OUTPUT_DIR, "cryptopunk_character.glb")
+def parse_args():
+    argv = sys.argv
+    output_dir = os.path.join(os.getcwd(), "output")
+    reference_image = None
 
-print("Starting CryptoPunk 3D pipeline...")
-print(f"OUTPUT_DIR = {OUTPUT_DIR}")
+    if "--" in argv:
+        args = argv[argv.index("--") + 1:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--output-dir" and i + 1 < len(args):
+                output_dir = args[i + 1]
+                i += 2
+                continue
+            if args[i] == "--reference-image" and i + 1 < len(args):
+                reference_image = args[i + 1]
+                i += 2
+                continue
+            i += 1
+
+    return output_dir, reference_image
+
+
+OUTPUT_DIR, REFERENCE_IMAGE = parse_args()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Blender context references
+OUTPUT_PNG = os.path.join(OUTPUT_DIR, "character_render.png")
+OUTPUT_BLEND = os.path.join(OUTPUT_DIR, "character_scene.blend")
+OUTPUT_GLB = os.path.join(OUTPUT_DIR, "character_scene.glb")
+
+print("=" * 80)
+print("Automated 3D character reconstruction render")
+print("=" * 80)
+print(f"OUTPUT_DIR      = {OUTPUT_DIR}")
+print(f"REFERENCE_IMAGE = {REFERENCE_IMAGE}")
+print(f"OUTPUT_PNG      = {OUTPUT_PNG}")
+print(f"OUTPUT_BLEND    = {OUTPUT_BLEND}")
+print(f"OUTPUT_GLB      = {OUTPUT_GLB}")
+
+# ============================================================
+# GLOBALS
+# ============================================================
 scene = bpy.context.scene
 view_layer = bpy.context.view_layer
 collection = bpy.context.collection
+mat_cache = {}
 
-if scene is None:
-    raise RuntimeError("No active Blender scene found")
+# ============================================================
+# RESET
+# ============================================================
+def clear_scene():
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete(use_global=False)
+
+    datablocks = [
+        bpy.data.meshes,
+        bpy.data.materials,
+        bpy.data.images,
+        bpy.data.lights,
+        bpy.data.cameras,
+        bpy.data.curves,
+        bpy.data.worlds,
+    ]
+
+    for blockset in datablocks:
+        for block in list(blockset):
+            try:
+                blockset.remove(block)
+            except Exception:
+                pass
+
+
+clear_scene()
 
 # ============================================================
 # HELPERS
 # ============================================================
-def clear_scene() -> None:
-    print("Clearing scene...")
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete(use_global=False)
-
-    for block in bpy.data.meshes:
-        if block.users == 0:
-            bpy.data.meshes.remove(block)
-
-    for block in bpy.data.materials:
-        if block.users == 0:
-            bpy.data.materials.remove(block)
-
-    for block in bpy.data.images:
-        if block.users == 0:
-            bpy.data.images.remove(block)
-
-    for block in bpy.data.cameras:
-        if block.users == 0:
-            bpy.data.cameras.remove(block)
-
-    for block in bpy.data.lights:
-        if block.users == 0:
-            bpy.data.lights.remove(block)
-
-    print("Scene cleared.")
-
-
-def set_active(obj: bpy.types.Object) -> None:
+def set_active(obj):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     view_layer.objects.active = obj
 
 
-def shade_smooth(obj: bpy.types.Object) -> None:
+def apply_transforms(obj):
+    set_active(obj)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+
+def smooth(obj):
     set_active(obj)
     try:
         bpy.ops.object.shade_smooth()
@@ -69,88 +103,59 @@ def shade_smooth(obj: bpy.types.Object) -> None:
         pass
 
 
-def apply_transform(obj: bpy.types.Object) -> None:
-    set_active(obj)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+def add_subsurf(obj, levels=2, render_levels=2):
+    mod = obj.modifiers.new("Subsurf", 'SUBSURF')
+    mod.levels = levels
+    mod.render_levels = render_levels
+    return mod
 
 
-def join_objects(objs, name: str) -> bpy.types.Object:
-    valid = [o for o in objs if o is not None]
-    if not valid:
-        raise RuntimeError(f"No objects to join for {name}")
-
-    bpy.ops.object.select_all(action='DESELECT')
-    for obj in valid:
-        obj.select_set(True)
-
-    view_layer.objects.active = valid[0]
-    bpy.ops.object.join()
-    joined = view_layer.objects.active
-    joined.name = name
-    return joined
+def add_bevel(obj, width=0.01, segments=3):
+    mod = obj.modifiers.new("Bevel", 'BEVEL')
+    mod.width = width
+    mod.segments = segments
+    mod.limit_method = 'ANGLE'
+    return mod
 
 
-def add_cube(name: str, location=(0, 0, 0), scale=(1, 1, 1)) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_cube_add(location=location)
-    obj = bpy.context.active_object
-    obj.name = name
-    obj.scale = scale
-    apply_transform(obj)
-    return obj
+def assign_mat(obj, mat):
+    if not obj.data:
+        return
+    if obj.data.materials:
+        obj.data.materials[0] = mat
+    else:
+        obj.data.materials.append(mat)
 
 
-def add_cylinder(name: str, location=(0, 0, 0), radius=0.1, depth=1.0, rotation=(0, 0, 0)) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=depth, location=location, rotation=rotation)
-    obj = bpy.context.active_object
-    obj.name = name
-    return obj
-
-
-def add_uv_sphere(name: str, location=(0, 0, 0), radius=0.1, scale=(1, 1, 1)) -> bpy.types.Object:
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=radius, location=location)
-    obj = bpy.context.active_object
-    obj.name = name
-    obj.scale = scale
-    apply_transform(obj)
-    return obj
-
-
-def ensure_world() -> None:
-    if scene.world is None:
-        scene.world = bpy.data.worlds.new("World")
-
-    world = scene.world
-    world.use_nodes = True
-
-    bg = world.node_tree.nodes.get("Background")
-    if bg:
-        bg.inputs[0].default_value = (0.02, 0.02, 0.03, 1.0)
-        bg.inputs[1].default_value = 0.6
-
-
-def make_principled_material(
-    name: str,
+def make_principled(
+    name,
     base_color=(0.8, 0.8, 0.8, 1.0),
-    roughness=0.45,
+    roughness=0.5,
     metallic=0.0,
     specular=0.5,
-    emission=(0.0, 0.0, 0.0, 1.0),
-    emission_strength=0.0
-) -> bpy.types.Material:
+    emission_color=None,
+    emission_strength=0.0,
+    alpha=1.0,
+    transmission=0.0,
+    subsurface=0.0,
+):
+    if name in mat_cache:
+        return mat_cache[name]
+
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
+    mat.blend_method = 'OPAQUE' if alpha >= 1.0 else 'BLEND'
 
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-
-    for n in list(nodes):
-        nodes.remove(n)
+    nt = mat.node_tree
+    nodes = nt.nodes
+    links = nt.links
+    nodes.clear()
 
     out = nodes.new(type="ShaderNodeOutputMaterial")
-    out.location = (300, 0)
+    out.location = (450, 0)
 
     bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
-    bsdf.location = (0, 0)
+    bsdf.location = (120, 0)
     bsdf.inputs["Base Color"].default_value = base_color
     bsdf.inputs["Roughness"].default_value = roughness
     bsdf.inputs["Metallic"].default_value = metallic
@@ -160,590 +165,538 @@ def make_principled_material(
     elif "Specular" in bsdf.inputs:
         bsdf.inputs["Specular"].default_value = specular
 
-    if "Emission Color" in bsdf.inputs:
-        bsdf.inputs["Emission Color"].default_value = emission
-    elif "Emission" in bsdf.inputs:
-        bsdf.inputs["Emission"].default_value = emission
+    if "Transmission Weight" in bsdf.inputs:
+        bsdf.inputs["Transmission Weight"].default_value = transmission
+    elif "Transmission" in bsdf.inputs:
+        bsdf.inputs["Transmission"].default_value = transmission
+
+    if "Subsurface Weight" in bsdf.inputs:
+        bsdf.inputs["Subsurface Weight"].default_value = subsurface
+    elif "Subsurface" in bsdf.inputs:
+        bsdf.inputs["Subsurface"].default_value = subsurface
+
+    if "Alpha" in bsdf.inputs:
+        bsdf.inputs["Alpha"].default_value = alpha
+
+    if emission_color is not None:
+        if "Emission Color" in bsdf.inputs:
+            bsdf.inputs["Emission Color"].default_value = emission_color
+        elif "Emission" in bsdf.inputs:
+            bsdf.inputs["Emission"].default_value = emission_color
 
     if "Emission Strength" in bsdf.inputs:
         bsdf.inputs["Emission Strength"].default_value = emission_strength
 
     links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+    mat_cache[name] = mat
     return mat
 
 
-def assign_material(obj: bpy.types.Object, mat: bpy.types.Material) -> None:
-    if obj.data is None:
-        return
-    if len(obj.data.materials) == 0:
-        obj.data.materials.append(mat)
-    else:
-        obj.data.materials[0] = mat
+def sphere(name, loc, radius, scale=(1, 1, 1), mat=None, seg=32, rings=16):
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        radius=radius,
+        segments=seg,
+        ring_count=rings,
+        location=loc
+    )
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale = scale
+    apply_transforms(obj)
+    if mat:
+        assign_mat(obj, mat)
+    smooth(obj)
+    return obj
 
+
+def cube(name, loc, scale=(1, 1, 1), rot=(0, 0, 0), mat=None):
+    bpy.ops.mesh.primitive_cube_add(location=loc, rotation=rot)
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale = scale
+    apply_transforms(obj)
+    if mat:
+        assign_mat(obj, mat)
+    return obj
+
+
+def cylinder(name, loc, radius, depth, rot=(0, 0, 0), scale=(1, 1, 1), mat=None, verts=32):
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=verts,
+        radius=radius,
+        depth=depth,
+        location=loc,
+        rotation=rot
+    )
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale = scale
+    apply_transforms(obj)
+    if mat:
+        assign_mat(obj, mat)
+    smooth(obj)
+    return obj
+
+
+def torus(name, loc, major_radius, minor_radius, rot=(0, 0, 0), mat=None):
+    bpy.ops.mesh.primitive_torus_add(
+        major_radius=major_radius,
+        minor_radius=minor_radius,
+        location=loc,
+        rotation=rot
+    )
+    obj = bpy.context.active_object
+    obj.name = name
+    if mat:
+        assign_mat(obj, mat)
+    smooth(obj)
+    return obj
+
+
+def curve_smoke(name, points, bevel_depth, mat):
+    curve = bpy.data.curves.new(name=name, type='CURVE')
+    curve.dimensions = '3D'
+    curve.resolution_u = 18
+    spline = curve.splines.new('BEZIER')
+    spline.bezier_points.add(len(points) - 1)
+
+    for i, p in enumerate(points):
+        bp = spline.bezier_points[i]
+        bp.co = Vector(p)
+        bp.handle_left_type = 'AUTO'
+        bp.handle_right_type = 'AUTO'
+
+    curve.bevel_depth = bevel_depth
+    curve.bevel_resolution = 4
+
+    obj = bpy.data.objects.new(name, curve)
+    collection.objects.link(obj)
+    obj.data.materials.append(mat)
+    return obj
+
+
+def area_light(name, location, rotation, energy, size, color):
+    data = bpy.data.lights.new(name=name, type='AREA')
+    data.energy = energy
+    data.shape = 'RECTANGLE'
+    data.size = size
+    data.size_y = size
+    data.color = color
+    obj = bpy.data.objects.new(name, data)
+    collection.objects.link(obj)
+    obj.location = location
+    obj.rotation_euler = rotation
+    return obj
+
+
+def point_light(name, location, energy, color, radius):
+    data = bpy.data.lights.new(name=name, type='POINT')
+    data.energy = energy
+    data.color = color
+    data.shadow_soft_size = radius
+    obj = bpy.data.objects.new(name, data)
+    collection.objects.link(obj)
+    obj.location = location
+    return obj
 
 # ============================================================
 # MATERIALS
 # ============================================================
-def create_materials():
-    print("Creating materials...")
-    mats = {}
+M_SKIN = make_principled("M_Skin", (0.93, 0.77, 0.61, 1.0), roughness=0.46, specular=0.32, subsurface=0.16)
+M_SKIN_DARK = make_principled("M_SkinDark", (0.70, 0.55, 0.44, 1.0), roughness=0.62, specular=0.18)
+M_HAIR = make_principled("M_Hair", (0.10, 0.07, 0.05, 1.0), roughness=0.72)
+M_BROW = make_principled("M_Brow", (0.07, 0.04, 0.03, 1.0), roughness=0.86)
+M_EYE_WHITE = make_principled("M_EyeWhite", (0.97, 0.97, 0.96, 1.0), roughness=0.08, specular=0.85)
+M_IRIS = make_principled("M_Iris", (0.39, 0.31, 0.14, 1.0), roughness=0.14, specular=0.70)
+M_PUPIL = make_principled("M_Pupil", (0.02, 0.02, 0.02, 1.0), roughness=0.06)
+M_SHINE = make_principled("M_Shine", (1.0, 1.0, 1.0, 1.0), roughness=0.0, emission_color=(1.0, 1.0, 1.0, 1.0), emission_strength=1.6)
+M_LIP = make_principled("M_Lip", (0.80, 0.61, 0.55, 1.0), roughness=0.36, specular=0.32, subsurface=0.06)
 
-    mats["skin"] = make_principled_material(
-        "M_Skin",
-        base_color=(0.96, 0.76, 0.58, 1.0),
-        roughness=0.7,
-        metallic=0.0,
-        specular=0.35
-    )
+M_CAP = make_principled("M_Cap", (0.06, 0.13, 0.47, 1.0), roughness=0.75, specular=0.20)
+M_CAP_UNDER = make_principled("M_CapUnder", (0.03, 0.07, 0.23, 1.0), roughness=0.82)
+M_CAP_LOGO = make_principled("M_CapLogo", (0.96, 0.96, 0.97, 1.0), roughness=0.18, specular=0.55)
 
-    mats["shirt"] = make_principled_material(
-        "M_Shirt",
-        base_color=(0.12, 0.62, 0.92, 1.0),
-        roughness=0.55,
-        metallic=0.0,
-        specular=0.45
-    )
+M_GREEN = make_principled("M_Green", (0.53, 0.72, 0.27, 1.0), roughness=0.82, specular=0.22)
+M_WHITE = make_principled("M_White", (0.94, 0.94, 0.93, 1.0), roughness=0.72)
+M_DARK = make_principled("M_Dark", (0.08, 0.09, 0.11, 1.0), roughness=0.68)
 
-    mats["coat"] = make_principled_material(
-        "M_Coat",
-        base_color=(0.10, 0.10, 0.12, 1.0),
-        roughness=0.35,
-        metallic=0.05,
-        specular=0.55
-    )
+M_EARRING = make_principled("M_Earring", (0.02, 0.02, 0.03, 1.0), roughness=0.12, metallic=0.90)
+M_WRIST_BLUE = make_principled("M_WristBlue", (0.22, 0.38, 0.65, 1.0), roughness=0.42)
+M_WRIST_WHITE = make_principled("M_WristWhite", (0.96, 0.97, 0.98, 1.0), roughness=0.34)
 
-    mats["pants"] = make_principled_material(
-        "M_Pants",
-        base_color=(0.08, 0.09, 0.12, 1.0),
-        roughness=0.6,
-        metallic=0.0,
-        specular=0.35
-    )
+M_LIGHTER_RED = make_principled("M_LighterRed", (0.78, 0.05, 0.05, 1.0), roughness=0.22, specular=0.56)
+M_CHROME = make_principled("M_Chrome", (0.76, 0.77, 0.80, 1.0), roughness=0.08, metallic=1.0)
+M_FLAME = make_principled("M_Flame", (1.0, 0.72, 0.18, 1.0), roughness=0.0, emission_color=(1.0, 0.56, 0.08, 1.0), emission_strength=20.0)
+M_FLAME_OUTER = make_principled("M_FlameOuter", (1.0, 0.82, 0.32, 1.0), roughness=0.0, emission_color=(1.0, 0.72, 0.16, 1.0), emission_strength=14.0, alpha=0.95)
 
-    mats["shoe"] = make_principled_material(
-        "M_Shoe",
-        base_color=(0.04, 0.04, 0.05, 1.0),
-        roughness=0.4,
-        metallic=0.1,
-        specular=0.45
-    )
+M_CIG_WHITE = make_principled("M_CigWhite", (0.94, 0.94, 0.94, 1.0), roughness=0.55)
+M_CIG_FILTER = make_principled("M_CigFilter", (0.77, 0.49, 0.19, 1.0), roughness=0.62)
+M_CIG_EMBER = make_principled("M_CigEmber", (0.96, 0.38, 0.06, 1.0), roughness=0.0, emission_color=(1.0, 0.30, 0.02, 1.0), emission_strength=8.0)
+M_SMOKE = make_principled("M_Smoke", (0.94, 0.94, 0.96, 1.0), roughness=0.18, alpha=0.14)
 
-    mats["hair"] = make_principled_material(
-        "M_Hair",
-        base_color=(0.15, 0.08, 0.03, 1.0),
-        roughness=0.75,
-        metallic=0.0,
-        specular=0.2
-    )
-
-    mats["eye"] = make_principled_material(
-        "M_Eye",
-        base_color=(0.03, 0.03, 0.03, 1.0),
-        roughness=0.2,
-        metallic=0.0,
-        specular=0.8
-    )
-
-    mats["mouth"] = make_principled_material(
-        "M_Mouth",
-        base_color=(0.25, 0.06, 0.08, 1.0),
-        roughness=0.5,
-        metallic=0.0,
-        specular=0.3
-    )
-
-    mats["glasses"] = make_principled_material(
-        "M_Glasses",
-        base_color=(0.03, 0.03, 0.04, 1.0),
-        roughness=0.15,
-        metallic=0.95,
-        specular=0.5
-    )
-
-    mats["earring"] = make_principled_material(
-        "M_Earring",
-        base_color=(0.95, 0.75, 0.12, 1.0),
-        roughness=0.22,
-        metallic=1.0,
-        specular=0.5
-    )
-
-    mats["bg"] = make_principled_material(
-        "M_Background",
-        base_color=(0.10, 0.08, 0.18, 1.0),
-        roughness=0.9,
-        metallic=0.0,
-        specular=0.2
-    )
-
-    print("Materials created.")
-    return mats
-
+M_BG = make_principled("M_BG", (0.02, 0.03, 0.05, 1.0), roughness=0.96)
+M_FLOOR = make_principled("M_Floor", (0.03, 0.03, 0.05, 1.0), roughness=0.16)
 
 # ============================================================
-# MODEL
+# WORLD
 # ============================================================
-def create_background(mats):
-    bg = add_cube(
-        "Background",
-        location=(0, 1.9, 0),
-        scale=(3.4, 0.05, 3.4)
-    )
-    assign_material(bg, mats["bg"])
-    return bg
-
-
-def create_character(mats):
-    print("Creating character...")
-
-    parts = []
-
-    # Head
-    head = add_cube(
-        "Head",
-        location=(0, 0, 1.65),
-        scale=(0.62, 0.24, 0.62)
-    )
-    assign_material(head, mats["skin"])
-    parts.append(head)
-
-    # Neck
-    neck = add_cube(
-        "Neck",
-        location=(0, 0, 1.05),
-        scale=(0.16, 0.12, 0.12)
-    )
-    assign_material(neck, mats["skin"])
-    parts.append(neck)
-
-    # Torso / shirt
-    torso = add_cube(
-        "Torso",
-        location=(0, 0, 0.45),
-        scale=(0.52, 0.24, 0.48)
-    )
-    assign_material(torso, mats["shirt"])
-    parts.append(torso)
-
-    # Coat panels
-    coat_left = add_cube(
-        "Coat_Left",
-        location=(-0.28, 0.0, 0.45),
-        scale=(0.10, 0.26, 0.50)
-    )
-    coat_right = add_cube(
-        "Coat_Right",
-        location=(0.28, 0.0, 0.45),
-        scale=(0.10, 0.26, 0.50)
-    )
-    assign_material(coat_left, mats["coat"])
-    assign_material(coat_right, mats["coat"])
-    parts.extend([coat_left, coat_right])
-
-    # Arms
-    arm_l = add_cube(
-        "Arm_L",
-        location=(-0.72, 0.0, 0.48),
-        scale=(0.14, 0.16, 0.46)
-    )
-    arm_r = add_cube(
-        "Arm_R",
-        location=(0.72, 0.0, 0.48),
-        scale=(0.14, 0.16, 0.46)
-    )
-    assign_material(arm_l, mats["coat"])
-    assign_material(arm_r, mats["coat"])
-    parts.extend([arm_l, arm_r])
-
-    # Hands
-    hand_l = add_cube(
-        "Hand_L",
-        location=(-0.72, 0.0, -0.12),
-        scale=(0.12, 0.12, 0.12)
-    )
-    hand_r = add_cube(
-        "Hand_R",
-        location=(0.72, 0.0, -0.12),
-        scale=(0.12, 0.12, 0.12)
-    )
-    assign_material(hand_l, mats["skin"])
-    assign_material(hand_r, mats["skin"])
-    parts.extend([hand_l, hand_r])
-
-    # Legs
-    leg_l = add_cube(
-        "Leg_L",
-        location=(-0.20, 0.0, -0.62),
-        scale=(0.18, 0.18, 0.52)
-    )
-    leg_r = add_cube(
-        "Leg_R",
-        location=(0.20, 0.0, -0.62),
-        scale=(0.18, 0.18, 0.52)
-    )
-    assign_material(leg_l, mats["pants"])
-    assign_material(leg_r, mats["pants"])
-    parts.extend([leg_l, leg_r])
-
-    # Shoes
-    shoe_l = add_cube(
-        "Shoe_L",
-        location=(-0.20, 0.12, -1.26),
-        scale=(0.22, 0.30, 0.10)
-    )
-    shoe_r = add_cube(
-        "Shoe_R",
-        location=(0.20, 0.12, -1.26),
-        scale=(0.22, 0.30, 0.10)
-    )
-    assign_material(shoe_l, mats["shoe"])
-    assign_material(shoe_r, mats["shoe"])
-    parts.extend([shoe_l, shoe_r])
-
-    # Hair
-    hair_top = add_cube(
-        "Hair_Top",
-        location=(0.0, 0.0, 2.10),
-        scale=(0.64, 0.25, 0.16)
-    )
-    assign_material(hair_top, mats["hair"])
-    parts.append(hair_top)
-
-    hair_left = add_cube(
-        "Hair_Left",
-        location=(-0.54, 0.0, 1.86),
-        scale=(0.10, 0.24, 0.24)
-    )
-    hair_right = add_cube(
-        "Hair_Right",
-        location=(0.54, 0.0, 1.86),
-        scale=(0.10, 0.24, 0.24)
-    )
-    assign_material(hair_left, mats["hair"])
-    assign_material(hair_right, mats["hair"])
-    parts.extend([hair_left, hair_right])
-
-    # Eyes
-    eye_l = add_cube(
-        "Eye_L",
-        location=(-0.20, -0.245, 1.70),
-        scale=(0.09, 0.02, 0.09)
-    )
-    eye_r = add_cube(
-        "Eye_R",
-        location=(0.20, -0.245, 1.70),
-        scale=(0.09, 0.02, 0.09)
-    )
-    assign_material(eye_l, mats["eye"])
-    assign_material(eye_r, mats["eye"])
-    parts.extend([eye_l, eye_r])
-
-    # Mouth
-    mouth = add_cube(
-        "Mouth",
-        location=(0.0, -0.245, 1.42),
-        scale=(0.18, 0.02, 0.05)
-    )
-    assign_material(mouth, mats["mouth"])
-    parts.append(mouth)
-
-    # Glasses
-    glass_l = add_cube(
-        "Glass_L",
-        location=(-0.20, -0.27, 1.70),
-        scale=(0.18, 0.02, 0.18)
-    )
-    glass_r = add_cube(
-        "Glass_R",
-        location=(0.20, -0.27, 1.70),
-        scale=(0.18, 0.02, 0.18)
-    )
-    bridge = add_cube(
-        "Glass_Bridge",
-        location=(0.0, -0.27, 1.70),
-        scale=(0.06, 0.02, 0.03)
-    )
-    assign_material(glass_l, mats["glasses"])
-    assign_material(glass_r, mats["glasses"])
-    assign_material(bridge, mats["glasses"])
-    parts.extend([glass_l, glass_r, bridge])
-
-    # Earring
-    earring = add_cylinder(
-        "Earring",
-        location=(-0.63, 0.0, 1.46),
-        radius=0.055,
-        depth=0.02,
-        rotation=(math.radians(90), 0, 0)
-    )
-    assign_material(earring, mats["earring"])
-    parts.append(earring)
-
-    # Slight stylization
-    for obj in parts:
-        shade_smooth(obj)
-
-    print("Character created.")
-    return parts
-
+world = bpy.data.worlds.new("World")
+scene.world = world
+world.use_nodes = True
+bg_node = world.node_tree.nodes.get("Background")
+bg_node.inputs[0].default_value = (0.01, 0.01, 0.02, 1.0)
+bg_node.inputs[1].default_value = 0.45
 
 # ============================================================
-# CAMERA / LIGHTS
+# REFERENCE BOARD
 # ============================================================
-def setup_camera():
-    print("Setting up camera...")
-    cam_data = bpy.data.cameras.new("Camera")
-    cam = bpy.data.objects.new("Camera", cam_data)
-    collection.objects.link(cam)
+if REFERENCE_IMAGE and os.path.exists(REFERENCE_IMAGE):
+    try:
+        ref_img = bpy.data.images.load(REFERENCE_IMAGE)
 
-    cam.location = (0.0, -5.4, 1.15)
-    cam.rotation_euler = Euler((math.radians(86.5), 0.0, 0.0), 'XYZ')
-    cam.data.lens = 52
-    cam.data.sensor_width = 36
-    scene.camera = cam
-    print("Camera ready.")
-    return cam
+        ref_mat = bpy.data.materials.new("M_Reference")
+        ref_mat.use_nodes = True
+        ref_mat.blend_method = 'BLEND'
+        n = ref_mat.node_tree.nodes
+        l = ref_mat.node_tree.links
+        n.clear()
 
+        out = n.new("ShaderNodeOutputMaterial")
+        em = n.new("ShaderNodeEmission")
+        tex = n.new("ShaderNodeTexImage")
+        tex.image = ref_img
 
-def add_area_light(name, location, rotation, energy=3000, size=2.0):
-    light_data = bpy.data.lights.new(name=name, type='AREA')
-    light_data.energy = energy
-    light_data.shape = 'RECTANGLE'
-    light_data.size = size
-    light_data.size_y = size
+        l.new(tex.outputs["Color"], em.inputs["Color"])
+        l.new(em.outputs["Emission"], out.inputs["Surface"])
 
-    light = bpy.data.objects.new(name, light_data)
-    collection.objects.link(light)
-    light.location = location
-    light.rotation_euler = rotation
-    return light
-
-
-def setup_lights():
-    print("Setting up lights...")
-
-    key = add_area_light(
-        "Key_Light",
-        location=(-2.6, -3.2, 3.8),
-        rotation=(math.radians(62), 0, math.radians(28)),
-        energy=4200,
-        size=3.0
-    )
-
-    fill = add_area_light(
-        "Fill_Light",
-        location=(2.5, -2.5, 2.0),
-        rotation=(math.radians(74), 0, math.radians(-35)),
-        energy=1600,
-        size=3.2
-    )
-
-    rim = add_area_light(
-        "Rim_Light",
-        location=(0.0, 2.4, 2.8),
-        rotation=(math.radians(-95), 0, 0),
-        energy=2400,
-        size=2.5
-    )
-
-    return [key, fill, rim]
-
+        bpy.ops.mesh.primitive_plane_add(size=2.8, location=(3.2, 0.0, 1.8), rotation=(0, math.radians(90), 0))
+        ref_plane = bpy.context.active_object
+        ref_plane.name = "ReferencePlane"
+        assign_mat(ref_plane, ref_mat)
+    except Exception as e:
+        print(f"Reference plane skipped: {e}")
 
 # ============================================================
-# RENDER SETTINGS
+# SUBJECT
 # ============================================================
-def setup_render():
-    print("Setting up render settings...")
+print("Building subject...")
 
-    scene.render.engine = 'CYCLES'
-    scene.cycles.device = 'CPU'
-    scene.cycles.samples = 96
-    scene.cycles.preview_samples = 24
-    scene.cycles.use_adaptive_sampling = True
-    scene.cycles.max_bounces = 6
-    scene.cycles.diffuse_bounces = 2
-    scene.cycles.glossy_bounces = 2
-    scene.cycles.transmission_bounces = 2
-    scene.cycles.transparent_max_bounces = 4
+# Head
+head = sphere("Head", (0.0, 0.00, 1.73), 0.40, scale=(1.05, 0.88, 1.12), mat=M_SKIN, seg=64, rings=32)
+add_subsurf(head, 2, 3)
 
-    scene.render.resolution_x = 1024
-    scene.render.resolution_y = 1024
-    scene.render.resolution_percentage = 100
-    scene.render.film_transparent = False
+jaw = sphere("Jaw", (0.0, -0.01, 1.64), 0.26, scale=(1.06, 0.78, 0.55), mat=M_SKIN, seg=32, rings=16)
+chin_shadow = sphere("Stubble", (0.0, -0.31, 1.59), 0.10, scale=(1.18, 0.36, 0.48), mat=M_SKIN_DARK, seg=24, rings=12)
 
-    scene.render.image_settings.file_format = 'PNG'
-    scene.render.image_settings.color_mode = 'RGBA'
-    scene.render.image_settings.compression = 15
-    scene.render.filepath = PNG_PATH
+neck = cylinder("Neck", (0.0, -0.02, 1.28), 0.115, 0.24, rot=(math.radians(90), 0, 0), scale=(1.0, 0.82, 1.0), mat=M_SKIN, verts=24)
 
+# Hair
+hair = sphere("Hair", (-0.03, 0.03, 1.83), 0.39, scale=(1.02, 0.91, 0.88), mat=M_HAIR, seg=48, rings=24)
+
+# Ears and earring
+ear_l = sphere("EarL", (-0.43, -0.02, 1.76), 0.072, scale=(0.42, 0.22, 0.75), mat=M_SKIN, seg=16, rings=8)
+ear_r = sphere("EarR", (0.41, -0.04, 1.77), 0.065, scale=(0.34, 0.18, 0.62), mat=M_SKIN, seg=16, rings=8)
+earring = torus("Earring", (-0.456, -0.07, 1.70), 0.022, 0.006, rot=(math.radians(90), 0.0, math.radians(12)), mat=M_EARRING)
+
+# Eyes
+def build_eye(side, x, y, z, brow_rot):
+    eye_white = sphere(f"EyeWhite_{side}", (x, y, z), 0.078, scale=(1.10, 0.42, 0.80), mat=M_EYE_WHITE, seg=32, rings=16)
+    iris = sphere(f"Iris_{side}", (x + (0.003 if x > 0 else -0.002), y - 0.045, z - 0.004), 0.038, scale=(1.0, 0.22, 1.0), mat=M_IRIS, seg=24, rings=12)
+    pupil = sphere(f"Pupil_{side}", (x + (0.003 if x > 0 else -0.002), y - 0.052, z - 0.004), 0.020, scale=(1.0, 0.16, 1.0), mat=M_PUPIL, seg=16, rings=8)
+    shine1 = sphere(f"Shine1_{side}", (x - 0.013, y - 0.058, z + 0.016), 0.010, scale=(1.0, 0.12, 1.0), mat=M_SHINE, seg=12, rings=6)
+    shine2 = sphere(f"Shine2_{side}", (x + 0.014, y - 0.056, z - 0.010), 0.006, scale=(1.0, 0.10, 1.0), mat=M_SHINE, seg=10, rings=5)
+    brow = cube(f"Brow_{side}", (x + (0.012 if x > 0 else -0.012), y - 0.05, z + 0.13), scale=(0.105, 0.015, 0.022), rot=(math.radians(5), 0.0, math.radians(brow_rot)), mat=M_BROW)
+    lash = cube(f"Lash_{side}", (x + (0.015 if x > 0 else -0.015), y - 0.052, z + 0.060), scale=(0.088, 0.010, 0.010), rot=(math.radians(3), 0.0, math.radians(10 if x > 0 else -10)), mat=M_BROW)
+    return [eye_white, iris, pupil, shine1, shine2, brow, lash]
+
+build_eye("L", -0.128, -0.305, 1.82, -16)
+build_eye("R", 0.145, -0.330, 1.80, 16)
+
+nose_bridge = sphere("NoseBridge", (0.03, -0.355, 1.74), 0.022, scale=(0.55, 0.35, 0.90), mat=M_SKIN, seg=16, rings=8)
+nose_tip = sphere("NoseTip", (0.05, -0.392, 1.71), 0.026, scale=(0.62, 0.42, 0.52), mat=M_SKIN, seg=16, rings=8)
+
+lip_upper = sphere("LipUpper", (0.07, -0.368, 1.633), 0.040, scale=(1.10, 0.24, 0.34), mat=M_LIP, seg=18, rings=9)
+lip_lower = sphere("LipLower", (0.068, -0.362, 1.609), 0.036, scale=(1.00, 0.26, 0.28), mat=M_LIP, seg=18, rings=9)
+
+# Cap
+cap_dome = sphere("CapDome", (0.0, 0.0, 2.12), 0.43, scale=(1.04, 1.00, 0.72), mat=M_CAP, seg=48, rings=24)
+cap_band = cube("CapBand", (0.0, -0.10, 1.96), scale=(0.44, 0.10, 0.07), rot=(math.radians(7), 0, 0), mat=M_CAP)
+add_bevel(cap_band, width=0.01, segments=3)
+
+bpy.ops.mesh.primitive_cylinder_add(vertices=64, radius=0.39, depth=0.05, location=(0.16, -0.35, 1.88), rotation=(math.radians(18), math.radians(2), math.radians(-2)))
+cap_brim = bpy.context.active_object
+cap_brim.name = "CapBrim"
+cap_brim.scale = (1.12, 0.58, 1.0)
+apply_transforms(cap_brim)
+assign_mat(cap_brim, M_CAP)
+smooth(cap_brim)
+
+bpy.ops.mesh.primitive_cylinder_add(vertices=64, radius=0.375, depth=0.02, location=(0.16, -0.35, 1.865), rotation=(math.radians(18), math.radians(2), math.radians(-2)))
+cap_under = bpy.context.active_object
+cap_under.name = "CapUnder"
+cap_under.scale = (1.12, 0.58, 1.0)
+apply_transforms(cap_under)
+assign_mat(cap_under, M_CAP_UNDER)
+smooth(cap_under)
+
+cap_button = sphere("CapButton", (0.0, 0.02, 2.42), 0.018, mat=M_CAP, seg=10, rings=5)
+logo_left = cube("LogoLeft", (-0.04, -0.377, 2.08), scale=(0.055, 0.012, 0.018), rot=(math.radians(8), math.radians(3), math.radians(38)), mat=M_CAP_LOGO)
+logo_right = cube("LogoRight", (0.065, -0.382, 2.105), scale=(0.108, 0.012, 0.018), rot=(math.radians(8), math.radians(2), math.radians(-24)), mat=M_CAP_LOGO)
+add_bevel(logo_left, width=0.004, segments=2)
+add_bevel(logo_right, width=0.004, segments=2)
+
+# Torso
+chest = cylinder("Chest", (0.00, -0.02, 1.00), 0.26, 0.66, rot=(math.radians(90), 0, 0), scale=(1.0, 0.82, 1.0), mat=M_WHITE, verts=32)
+shirt = cylinder("Shirt", (-0.01, -0.01, 1.02), 0.31, 0.62, rot=(math.radians(90), 0, 0), scale=(1.03, 0.84, 1.0), mat=M_GREEN, verts=32)
+
+shirt_l = cube("ShirtL", (-0.16, -0.22, 1.05), scale=(0.12, 0.03, 0.31), rot=(math.radians(-8), 0, math.radians(4)), mat=M_GREEN)
+shirt_r = cube("ShirtR", (0.12, -0.21, 1.03), scale=(0.10, 0.03, 0.29), rot=(math.radians(-8), 0, math.radians(-4)), mat=M_GREEN)
+collar_l = cube("CollarL", (-0.10, -0.27, 1.36), scale=(0.09, 0.018, 0.11), rot=(math.radians(-32), math.radians(4), math.radians(18)), mat=M_GREEN)
+collar_r = cube("CollarR", (0.10, -0.28, 1.34), scale=(0.08, 0.018, 0.10), rot=(math.radians(-28), math.radians(-4), math.radians(-14)), mat=M_GREEN)
+inner_black = cube("InnerBlack", (0.00, -0.18, 0.95), scale=(0.05, 0.018, 0.26), mat=M_DARK)
+
+for i, z in enumerate([1.22, 1.08, 0.95]):
+    sphere(f"Button_{i}", (-0.035, -0.300, z), 0.016, scale=(1.0, 0.35, 1.0), mat=M_WHITE, seg=12, rings=6)
+
+# Arms
+shoulder_l = sphere("ShoulderL", (-0.38, -0.02, 1.18), 0.14, scale=(0.9, 0.8, 0.8), mat=M_GREEN, seg=24, rings=12)
+upper_l = cylinder("UpperL", (-0.50, -0.02, 0.98), 0.085, 0.30, rot=(math.radians(10), 0, math.radians(20)), mat=M_GREEN, verts=20)
+fore_l = cylinder("ForeL", (-0.58, -0.04, 0.77), 0.065, 0.25, rot=(math.radians(12), 0, math.radians(18)), mat=M_SKIN, verts=20)
+hand_l = sphere("HandL", (-0.62, -0.07, 0.60), 0.07, scale=(0.8, 0.52, 0.75), mat=M_SKIN, seg=18, rings=9)
+
+shoulder_r = sphere("ShoulderR", (0.30, -0.04, 1.12), 0.14, scale=(0.95, 0.85, 0.82), mat=M_GREEN, seg=24, rings=12)
+upper_r = cylinder("UpperR", (0.42, -0.14, 0.99), 0.09, 0.28, rot=(math.radians(-28), 0, math.radians(-22)), mat=M_GREEN, verts=20)
+fore_r = cylinder("ForeR", (0.54, -0.28, 0.84), 0.072, 0.25, rot=(math.radians(-44), 0, math.radians(-18)), mat=M_SKIN, verts=20)
+
+wrist_blue = torus("WristBlue", (0.58, -0.31, 0.69), 0.082, 0.018, rot=(math.radians(58), 0, math.radians(14)), mat=M_WRIST_BLUE)
+wrist_white = torus("WristWhite", (0.582, -0.31, 0.69), 0.065, 0.008, rot=(math.radians(58), 0, math.radians(14)), mat=M_WRIST_WHITE)
+
+hand_r = sphere("HandR", (0.67, -0.38, 0.63), 0.10, scale=(0.98, 0.70, 0.78), mat=M_SKIN, seg=24, rings=12)
+thumb_r = cylinder("ThumbR", (0.62, -0.34, 0.62), 0.018, 0.08, rot=(math.radians(10), math.radians(72), math.radians(-10)), mat=M_SKIN, verts=12)
+
+for i, (fx, fy, fz, rx) in enumerate([
+    (0.714, -0.402, 0.67, -64),
+    (0.722, -0.405, 0.63, -66),
+    (0.720, -0.406, 0.59, -68),
+    (0.714, -0.405, 0.55, -70),
+]):
+    cylinder(f"Finger_{i}", (fx, fy, fz), 0.014, 0.072, rot=(math.radians(rx), 0, math.radians(10)), mat=M_SKIN, verts=12)
+
+# Lighter
+lighter_body = cube("LighterBody", (0.73, -0.42, 0.64), scale=(0.06, 0.03, 0.115), rot=(math.radians(2), math.radians(4), math.radians(8)), mat=M_LIGHTER_RED)
+add_bevel(lighter_body, width=0.008, segments=3)
+
+lighter_top = cube("LighterTop", (0.733, -0.420, 0.760), scale=(0.05, 0.025, 0.028), rot=(math.radians(2), math.radians(4), math.radians(8)), mat=M_CHROME)
+add_bevel(lighter_top, width=0.004, segments=2)
+
+lighter_wheel = cylinder("LighterWheel", (0.720, -0.401, 0.776), 0.010, 0.020, rot=(math.radians(90), 0, math.radians(10)), mat=M_CHROME, verts=14)
+
+flame_inner = sphere("FlameInner", (0.73, -0.43, 0.815), 0.018, scale=(0.45, 0.35, 1.35), mat=M_FLAME, seg=12, rings=6)
+flame_outer = sphere("FlameOuter", (0.73, -0.43, 0.832), 0.024, scale=(0.55, 0.45, 1.45), mat=M_FLAME_OUTER, seg=12, rings=6)
+
+# Cigarette and smoke
+cig_body = cylinder("CigBody", (0.39, -0.386, 1.64), 0.018, 0.29, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_WHITE, verts=24)
+cig_filter = cylinder("CigFilter", (0.27, -0.375, 1.64), 0.0185, 0.075, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_FILTER, verts=24)
+cig_ember = cylinder("CigEmber", (0.52, -0.397, 1.64), 0.015, 0.020, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_EMBER, verts=20)
+
+curve_smoke("Smoke0", [(0.55, -0.39, 1.67), (0.67, -0.27, 1.74), (0.79, -0.22, 1.84), (0.90, -0.18, 1.98)], 0.014, M_SMOKE)
+curve_smoke("Smoke1", [(0.57, -0.37, 1.65), (0.67, -0.30, 1.77), (0.76, -0.26, 1.92), (0.83, -0.18, 2.06)], 0.011, M_SMOKE)
+curve_smoke("Smoke2", [(0.56, -0.40, 1.66), (0.62, -0.32, 1.79), (0.70, -0.24, 1.90), (0.77, -0.12, 2.00)], 0.009, M_SMOKE)
+
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+print("Building environment...")
+
+bpy.ops.mesh.primitive_plane_add(size=14, location=(0, 3.6, 1.6), rotation=(math.radians(90), 0, 0))
+bg_plane = bpy.context.active_object
+bg_plane.name = "BGPlane"
+assign_mat(bg_plane, M_BG)
+
+bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, 0))
+floor = bpy.context.active_object
+floor.name = "Floor"
+assign_mat(floor, M_FLOOR)
+
+def add_bokeh(idx, loc, color, strength, radius):
+    m = make_principled(
+        f"M_Bokeh_{idx}",
+        base_color=(*color, 1.0),
+        roughness=0.0,
+        emission_color=(*color, 1.0),
+        emission_strength=strength
+    )
+    sphere(f"Bokeh_{idx}", loc, radius, mat=m, seg=12, rings=6)
+
+for i, spec in enumerate([
+    ((-2.6, 3.2, 2.3), (1.00, 0.62, 0.25), 12.0, 0.22),
+    ((-1.4, 3.9, 0.8), (0.98, 0.56, 0.20), 10.0, 0.18),
+    ((1.8, 3.4, 2.8), (0.98, 0.58, 0.21), 12.0, 0.16),
+    ((2.7, 3.0, 1.1), (1.00, 0.68, 0.25), 11.0, 0.20),
+    ((-0.9, 4.2, 3.1), (0.40, 0.52, 0.95), 8.0, 0.10),
+    ((0.9, 4.1, 0.9), (0.35, 0.44, 0.95), 8.0, 0.09),
+    ((-2.9, 3.5, 1.3), (0.95, 0.73, 0.42), 9.0, 0.12),
+]):
+    add_bokeh(i, *spec)
+
+# ============================================================
+# LIGHTS
+# ============================================================
+print("Building lights...")
+
+key = area_light("Key", (-1.2, -2.1, 2.5), (math.radians(62), math.radians(2), math.radians(20)), 4500, 2.3, (1.0, 0.88, 0.76))
+fill = area_light("Fill", (1.9, -1.7, 1.8), (math.radians(76), 0, math.radians(-34)), 1500, 2.8, (0.68, 0.76, 1.0))
+rim = area_light("Rim", (0.8, 1.6, 2.4), (math.radians(-108), 0, math.radians(12)), 2200, 1.8, (1.0, 0.74, 0.45))
+flame_light = point_light("FlameLight", (0.73, -0.43, 0.82), 350, (1.0, 0.45, 0.10), 0.06)
+ember_light = point_light("EmberLight", (0.53, -0.39, 1.65), 120, (1.0, 0.28, 0.05), 0.04)
+
+# ============================================================
+# CAMERA
+# ============================================================
+print("Setting camera...")
+
+cam_data = bpy.data.cameras.new("Camera")
+cam = bpy.data.objects.new("Camera", cam_data)
+collection.objects.link(cam)
+scene.camera = cam
+
+cam.location = (-0.85, -3.55, 1.74)
+cam.rotation_euler = Euler((math.radians(86.4), 0.0, math.radians(-17.0)), 'XYZ')
+cam.data.lens = 85
+cam.data.sensor_width = 36
+cam.data.dof.use_dof = True
+cam.data.dof.aperture_fstop = 1.8
+cam.data.dof.focus_distance = 3.1
+
+# ============================================================
+# RENDER
+# ============================================================
+print("Setting render...")
+
+scene.render.engine = 'CYCLES'
+scene.cycles.device = 'CPU'
+scene.cycles.samples = 128
+scene.cycles.preview_samples = 24
+scene.cycles.use_adaptive_sampling = True
+scene.cycles.max_bounces = 6
+scene.cycles.diffuse_bounces = 2
+scene.cycles.glossy_bounces = 3
+scene.cycles.transparent_max_bounces = 4
+
+scene.render.resolution_x = 1280
+scene.render.resolution_y = 1280
+scene.render.resolution_percentage = 100
+scene.render.film_transparent = False
+scene.render.image_settings.file_format = 'PNG'
+scene.render.image_settings.color_mode = 'RGBA'
+scene.render.filepath = OUTPUT_PNG
+
+try:
     scene.view_settings.look = 'None'
-    scene.view_settings.exposure = 0.0
-    scene.view_settings.gamma = 1.0
-
-    print("Render settings ready.")
-
+except Exception:
+    pass
+scene.view_settings.exposure = 0.15
+scene.view_settings.gamma = 1.0
 
 # ============================================================
 # COMPOSITOR
 # ============================================================
-def setup_compositor(scene_obj) -> None:
-    print("Setting up compositor...")
+print("Setting compositor...")
 
-    if scene_obj is None:
-        raise RuntimeError("No active Blender scene found")
-
+def setup_compositor(scene_obj):
     scene_obj.use_nodes = True
+    tree = scene_obj.node_tree
+    nodes = tree.nodes
+    links = tree.links
+    nodes.clear()
 
-    comp_tree = scene_obj.node_tree
-    if comp_tree is None:
-        raise RuntimeError("Scene node tree is unavailable")
+    rl = nodes.new(type="CompositorNodeRLayers")
+    rl.location = (-500, 0)
 
-    comp_nodes = comp_tree.nodes
-    comp_links = comp_tree.links
-    comp_nodes.clear()
+    glare = nodes.new(type="CompositorNodeGlare")
+    glare.location = (-220, 0)
+    glare.glare_type = 'FOG_GLOW'
+    glare.quality = 'HIGH'
+    glare.threshold = 0.78
+    glare.size = 7
+    links.new(rl.outputs["Image"], glare.inputs["Image"])
 
-    rl = comp_nodes.new(type='CompositorNodeRLayers')
-    rl.location = (-400, 0)
-    last_image_out = rl.outputs['Image']
-
+    lens = nodes.new(type="CompositorNodeLensdist")
+    lens.location = (20, 0)
     try:
-        glare = comp_nodes.new(type='CompositorNodeGlare')
-        glare.location = (-100, 0)
-        glare.glare_type = 'FOG_GLOW'
-        glare.quality = 'HIGH'
-        glare.threshold = 0.85
-        glare.size = 7
-        comp_links.new(last_image_out, glare.inputs['Image'])
-        last_image_out = glare.outputs['Image']
-        print("Glare: OK")
-    except Exception as e:
-        print(f"Glare skipped: {e}")
+        lens.inputs[1].default_value = -0.008
+        lens.inputs[2].default_value = 0.002
+    except Exception:
+        pass
+    links.new(glare.outputs["Image"], lens.inputs["Image"])
 
-    try:
-        lens = comp_nodes.new(type='CompositorNodeLensdist')
-        lens.location = (150, 0)
-        lens.inputs[1].default_value = -0.015
-        lens.inputs[2].default_value = 0.004
-        comp_links.new(last_image_out, lens.inputs['Image'])
-        last_image_out = lens.outputs['Image']
-        print("Lens distortion: OK")
-    except Exception as e:
-        print(f"Lens distortion skipped: {e}")
+    cb = nodes.new(type="CompositorNodeColorBalance")
+    cb.location = (260, 0)
+    cb.correction_method = 'LIFT_GAMMA_GAIN'
+    cb.lift = (0.98, 0.99, 1.02, 1.0)
+    cb.gamma = (1.02, 1.00, 0.98, 1.0)
+    cb.gain = (1.04, 1.02, 0.98, 1.0)
+    links.new(lens.outputs["Image"], cb.inputs["Image"])
 
-    try:
-        cb = comp_nodes.new(type='CompositorNodeColorBalance')
-        cb.location = (400, 0)
-        cb.correction_method = 'LIFT_GAMMA_GAIN'
-        cb.lift = (0.96, 0.97, 1.02, 1.0)
-        cb.gamma = (1.02, 1.00, 0.97, 1.0)
-        cb.gain = (1.05, 1.02, 0.95, 1.0)
-        comp_links.new(last_image_out, cb.inputs['Image'])
-        last_image_out = cb.outputs['Image']
-        print("Color balance: OK")
-    except Exception as e:
-        print(f"Color balance skipped: {e}")
+    ellipse = nodes.new(type="CompositorNodeEllipseMask")
+    ellipse.location = (260, -260)
+    ellipse.width = 0.88
+    ellipse.height = 0.84
 
-    try:
-        ellipse = comp_nodes.new(type='CompositorNodeEllipseMask')
-        ellipse.location = (150, -250)
-        ellipse.width = 0.85
-        ellipse.height = 0.85
+    blur = nodes.new(type="CompositorNodeBlur")
+    blur.location = (460, -260)
+    blur.size_x = 160
+    blur.size_y = 160
+    links.new(ellipse.outputs["Mask"], blur.inputs["Image"])
 
-        blur_vig = comp_nodes.new(type='CompositorNodeBlur')
-        blur_vig.location = (350, -250)
-        blur_vig.size_x = 120
-        blur_vig.size_y = 120
+    mix = nodes.new(type="CompositorNodeMixRGB")
+    mix.location = (520, 0)
+    mix.blend_type = 'MULTIPLY'
+    mix.inputs[0].default_value = 0.34
+    links.new(cb.outputs["Image"], mix.inputs[1])
+    links.new(blur.outputs["Image"], mix.inputs[2])
 
-        comp_links.new(ellipse.outputs['Mask'], blur_vig.inputs['Image'])
+    comp = nodes.new(type="CompositorNodeComposite")
+    comp.location = (760, 0)
+    links.new(mix.outputs["Image"], comp.inputs["Image"])
 
-        mix_vig = comp_nodes.new(type='CompositorNodeMixRGB')
-        mix_vig.location = (600, 0)
-        mix_vig.blend_type = 'MULTIPLY'
-        mix_vig.inputs[0].default_value = 0.55
-
-        comp_links.new(last_image_out, mix_vig.inputs[1])
-        comp_links.new(blur_vig.outputs['Image'], mix_vig.inputs[2])
-        last_image_out = mix_vig.outputs['Image']
-        print("Vignette: OK")
-    except Exception as e:
-        print(f"Vignette skipped: {e}")
-
-    comp_out = comp_nodes.new(type='CompositorNodeComposite')
-    comp_out.location = (850, 0)
-    comp_links.new(last_image_out, comp_out.inputs['Image'])
-
-    try:
-        viewer = comp_nodes.new(type='CompositorNodeViewer')
-        viewer.location = (850, -150)
-        comp_links.new(last_image_out, viewer.inputs['Image'])
-        print("Viewer: OK")
-    except Exception as e:
-        print(f"Viewer skipped: {e}")
-
-    print("Compositor configured.")
-
+setup_compositor(scene)
 
 # ============================================================
-# EXPORTS
+# SAVE / EXPORT
 # ============================================================
 def save_outputs():
-    print("Saving outputs...")
-
-    print(f"Render target: {PNG_PATH}")
+    print("Rendering still...")
     bpy.ops.render.render(write_still=True)
-    print("PNG render finished.")
+    print("PNG render complete.")
 
-    bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
+    print("Saving blend...")
+    bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_BLEND)
     print("BLEND saved.")
 
+    print("Exporting GLB...")
     try:
         bpy.ops.export_scene.gltf(
-            filepath=GLB_PATH,
+            filepath=OUTPUT_GLB,
             export_format='GLB',
             use_selection=False
         )
         print("GLB exported.")
     except Exception as e:
-        print(f"GLB export failed (non-fatal): {e}")
+        print(f"GLB export skipped: {e}")
 
-    print(f"PNG exists:   {os.path.exists(PNG_PATH)}")
-    print(f"BLEND exists: {os.path.exists(BLEND_PATH)}")
-    print(f"GLB exists:   {os.path.exists(GLB_PATH)}")
+    print(f"PNG exists   = {os.path.exists(OUTPUT_PNG)}")
+    print(f"BLEND exists = {os.path.exists(OUTPUT_BLEND)}")
+    print(f"GLB exists   = {os.path.exists(OUTPUT_GLB)}")
 
 
-# ============================================================
-# MAIN
-# ============================================================
-def main():
-    clear_scene()
-    ensure_world()
-    mats = create_materials()
-    create_background(mats)
-    create_character(mats)
-    setup_camera()
-    setup_lights()
-    setup_render()
-
-    try:
-        setup_compositor(scene)
-    except Exception as e:
-        print(f"Compositor failed entirely (non-fatal): {e}")
-        if scene is not None:
-            scene.use_nodes = False
-
+try:
     save_outputs()
-
-    if not os.path.exists(PNG_PATH):
-        raise RuntimeError("Render completed but PNG file was not generated at expected path")
-
+    if not os.path.exists(OUTPUT_PNG):
+        raise RuntimeError("PNG output missing")
     print("Pipeline complete.")
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print("FATAL ERROR in cryptopunk_3d.py")
-        print(str(e))
-        traceback.print_exc()
-        raise
+except Exception as e:
+    print("FATAL ERROR")
+    print(str(e))
+    traceback.print_exc()
+    raise
