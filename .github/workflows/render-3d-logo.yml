@@ -19,17 +19,17 @@ jobs:
     timeout-minutes: 90
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Debug — Confirm Files
+        shell: bash
         run: |
           echo "=== Git log ==="
           git log --oneline -5
           echo ""
-          echo "=== Script first 10 lines ==="
-          head -10 "${{ env.SCRIPT_PATH }}" || echo "SCRIPT NOT FOUND"
+          echo "=== Script first 20 lines ==="
+          head -20 "${{ env.SCRIPT_PATH }}" || echo "SCRIPT NOT FOUND"
           echo ""
           echo "=== Workflow file keys ==="
           cat .github/workflows/*.yml | grep -E "cache|key|BLENDER|SCRIPT" || true
@@ -39,11 +39,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-3.6.21-ubuntu22-v10
+          key: blender-3.6.21-ubuntu22-v11
 
       - name: Download Blender 3.6 LTS
         if: steps.cache-blender.outputs.cache-hit != 'true'
+        shell: bash
         run: |
+          set -e
           echo "Downloading Blender 3.6.21..."
           wget -q \
             "https://download.blender.org/release/Blender3.6/blender-3.6.21-linux-x64.tar.xz" \
@@ -54,11 +56,14 @@ jobs:
           echo "Blender installed"
 
       - name: Set Blender Path
+        shell: bash
         run: |
+          set -e
           ~/blender/blender --version
-          echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
+          echo "BLENDER_PATH=$HOME/blender/blender" >> "$GITHUB_ENV"
 
       - name: Install Dependencies
+        shell: bash
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -89,6 +94,7 @@ jobs:
             || true
 
       - name: Show GL Libraries
+        shell: bash
         run: |
           echo "=== GL Libraries ==="
           ldconfig -p | grep -E "libGL|libEGL|libOSMesa" || true
@@ -101,9 +107,11 @@ jobs:
           find /usr -name "libOSMesa*" 2>/dev/null || echo "OSMesa not found anywhere"
 
       - name: Verify Script
+        shell: bash
         run: |
+          set -e
           if [ -f "${{ env.SCRIPT_PATH }}" ]; then
-            echo "Script OK — $(wc -l < ${{ env.SCRIPT_PATH }}) lines"
+            echo "Script OK — $(wc -l < "${{ env.SCRIPT_PATH }}") lines"
           else
             echo "ERROR: Script not found"
             find . -name "*.py" | grep -v ".git"
@@ -111,10 +119,13 @@ jobs:
           fi
 
       - name: Prepare Output Directory
-        run: mkdir -p output
+        shell: bash
+        run: |
+          mkdir -p output
 
       - name: Test Blender — Attempt 1 (llvmpipe)
         id: test1
+        shell: bash
         run: |
           echo "=== Test 1: llvmpipe software renderer ==="
           LIBGL_ALWAYS_SOFTWARE=1 \
@@ -122,87 +133,101 @@ jobs:
           MESA_GL_VERSION_OVERRIDE=3.3 \
           MESA_GLSL_VERSION_OVERRIDE=330 \
           LIBGL_DEBUG=verbose \
-          ${{ env.BLENDER_PATH }} \
+          "${{ env.BLENDER_PATH }}" \
             --background \
             --factory-startup \
             --python-exit-code 1 \
             --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
             2>&1 | tee /tmp/blender_test.log || true
+
           echo "--- log ---"
           cat /tmp/blender_test.log
+
           if grep -q "BLENDER_OK" /tmp/blender_test.log; then
-            echo "TEST1_PASSED=true" >> $GITHUB_ENV
+            echo "TEST1_PASSED=true" >> "$GITHUB_ENV"
             echo "PASSED"
           else
-            echo "TEST1_PASSED=false" >> $GITHUB_ENV
+            echo "TEST1_PASSED=false" >> "$GITHUB_ENV"
             echo "FAILED — trying next method"
           fi
 
       - name: Test Blender — Attempt 2 (softpipe fallback)
         if: env.TEST1_PASSED == 'false'
+        shell: bash
         run: |
           echo "=== Test 2: softpipe fallback ==="
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=softpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
           LIBGL_DEBUG=verbose \
-          ${{ env.BLENDER_PATH }} \
+          "${{ env.BLENDER_PATH }}" \
             --background \
             --factory-startup \
             --python-exit-code 1 \
             --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
             2>&1 | tee /tmp/blender_test2.log || true
+
           echo "--- log ---"
           cat /tmp/blender_test2.log
+
           if grep -q "BLENDER_OK" /tmp/blender_test2.log; then
-            echo "TEST2_PASSED=true" >> $GITHUB_ENV
+            echo "TEST2_PASSED=true" >> "$GITHUB_ENV"
             cp /tmp/blender_test2.log /tmp/blender_test.log
             echo "PASSED"
           else
-            echo "TEST2_PASSED=false" >> $GITHUB_ENV
+            echo "TEST2_PASSED=false" >> "$GITHUB_ENV"
             echo "FAILED"
           fi
 
       - name: Test Blender — Attempt 3 (Xvfb + llvmpipe)
         if: env.TEST1_PASSED == 'false' && env.TEST2_PASSED == 'false'
+        shell: bash
         run: |
           echo "=== Test 3: Xvfb + llvmpipe ==="
           pkill Xvfb || true
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
           sleep 4
+
           DISPLAY=:99 \
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
           LIBGL_DEBUG=verbose \
-          ${{ env.BLENDER_PATH }} \
+          "${{ env.BLENDER_PATH }}" \
             --background \
             --factory-startup \
             --python-exit-code 1 \
             --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
             2>&1 | tee /tmp/blender_test3.log || true
+
           pkill Xvfb || true
+
           echo "--- log ---"
           cat /tmp/blender_test3.log
+
           if grep -q "BLENDER_OK" /tmp/blender_test3.log; then
-            echo "TEST3_PASSED=true" >> $GITHUB_ENV
+            echo "TEST3_PASSED=true" >> "$GITHUB_ENV"
             cp /tmp/blender_test3.log /tmp/blender_test.log
             echo "PASSED"
           else
-            echo "TEST3_PASSED=false" >> $GITHUB_ENV
+            echo "TEST3_PASSED=false" >> "$GITHUB_ENV"
             echo "FAILED — see log above for actual error"
           fi
 
       - name: Run Blender Pipeline
         timeout-minutes: 70
+        shell: bash
         run: |
+          set -o pipefail
           echo "Starting render pipeline..."
+          mkdir -p "${{ github.workspace }}/output"
+
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
           MESA_GLSL_VERSION_OVERRIDE=330 \
           LP_NUM_THREADS=4 \
-          ${{ env.BLENDER_PATH }} \
+          "${{ env.BLENDER_PATH }}" \
             --background \
             --factory-startup \
             --python-exit-code 1 \
@@ -219,24 +244,48 @@ jobs:
           echo ""
           echo "=== Output files ==="
           ls -lah "${{ github.workspace }}/output/" || true
-          exit ${BLENDER_EXIT}
+          exit "${BLENDER_EXIT}"
 
       - name: Verify Output Files
+        shell: bash
         run: |
+          set -e
           ls -lah output/ || true
+
           RENDER_OK=false
+
           [ -f "output/cryptopunk_character_render.png" ] \
             && RENDER_OK=true && echo "PNG:   OK" \
             || echo "PNG:   MISSING"
+
           [ -f "output/cryptopunk_character.blend" ] \
-            && echo "BLEND: OK" || echo "BLEND: not generated"
+            && echo "BLEND: OK" \
+            || echo "BLEND: not generated"
+
           [ -f "output/cryptopunk_character.usdz" ] \
-            && echo "USDZ:  OK" || echo "USDZ:  not generated"
+            && echo "USDZ:  OK" \
+            || echo "USDZ:  not generated"
+
           [ -f "output/cryptopunk_character.glb" ] \
-            && echo "GLB:   OK" || echo "GLB:   not generated"
-          [ "$RENDER_OK" = false ] \
-            && echo "FATAL: PNG missing" && exit 1
+            && echo "GLB:   OK" \
+            || echo "GLB:   not generated"
+
+          [ "$RENDER_OK" = false ] && echo "FATAL: PNG missing" && exit 1
+
           echo "SUCCESS"
+
+      - name: Check USDZ output
+        id: usdz_check
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "output/cryptopunk_character.usdz" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "USDZ found."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "USDZ not generated. Skipping upload."
+          fi
 
       - name: Upload Debug Log
         uses: actions/upload-artifact@v4
@@ -276,12 +325,11 @@ jobs:
 
       - name: Upload USDZ iPhone AR
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.usdz_check.outputs.exists == 'true'
         with:
           name: character-iPhone-AR-USDZ
           path: output/cryptopunk_character.usdz
           retention-days: 30
-          if-no-files-found: warn
 
       - name: Upload GLB Web
         uses: actions/upload-artifact@v4
@@ -303,10 +351,12 @@ jobs:
 
       - name: Job Summary
         if: always()
+        shell: bash
         run: |
-          echo "## CryptoPunk Render Results" >> $GITHUB_STEP_SUMMARY
-          echo "| File | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "## CryptoPunk Render Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| File | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+
           for f in \
             "PNG:output/cryptopunk_character_render.png" \
             "BLEND:output/cryptopunk_character.blend" \
@@ -315,5 +365,5 @@ jobs:
             LABEL=$(echo "$f" | cut -d: -f1)
             FILE=$(echo "$f" | cut -d: -f2)
             [ -f "$FILE" ] && STATUS="✅ Ready" || STATUS="❌ Not generated"
-            echo "| $LABEL | $STATUS |" >> $GITHUB_STEP_SUMMARY
+            echo "| $LABEL | $STATUS |" >> "$GITHUB_STEP_SUMMARY"
           done
