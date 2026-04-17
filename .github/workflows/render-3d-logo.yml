@@ -1,68 +1,60 @@
-name: 3D CryptoPunk Character Render
+name: Render 3D Character
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
 
 env:
   BLENDER_VERSION: "3.6.21"
-  BLENDER_MAJOR: "3.6"
-  SCRIPT_PATH: "scripts/cryptopunk_3d.py"
+  SCRIPT_PATH: "scripts/render_character.py"
+  REF_IMAGE: "assets/reference.png"
 
 jobs:
   render:
-    name: Build and Render 3D Character
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Debug — Confirm Files
+      - name: Verify inputs
         shell: bash
         run: |
-          echo "=== Git log ==="
-          git log --oneline -5
-          echo ""
-          echo "=== Script first 20 lines ==="
-          head -20 "${{ env.SCRIPT_PATH }}" || echo "SCRIPT NOT FOUND"
-          echo ""
-          echo "=== Workflow file keys ==="
-          cat .github/workflows/*.yml | grep -E "cache|key|BLENDER|SCRIPT" || true
+          set -e
+          test -f "${{ env.SCRIPT_PATH }}"
+          test -f "${{ env.REF_IMAGE }}"
+          echo "Script:    ${{ env.SCRIPT_PATH }}"
+          echo "Reference: ${{ env.REF_IMAGE }}"
 
       - name: Cache Blender
         id: cache-blender
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-3.6.21-ubuntu22-v12
+          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-render-v2
 
-      - name: Download Blender 3.6 LTS
+      - name: Download Blender
         if: steps.cache-blender.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -e
-          echo "Downloading Blender 3.6.21..."
           wget -q \
-            "https://download.blender.org/release/Blender3.6/blender-3.6.21-linux-x64.tar.xz" \
+            "https://download.blender.org/release/Blender3.6/blender-${{ env.BLENDER_VERSION }}-linux-x64.tar.xz" \
             -O /tmp/blender.tar.xz
           mkdir -p ~/blender
           tar -xf /tmp/blender.tar.xz -C ~/blender --strip-components=1
-          rm /tmp/blender.tar.xz
-          echo "Blender installed"
+          rm -f /tmp/blender.tar.xz
 
-      - name: Set Blender Path
+      - name: Set Blender path
         shell: bash
         run: |
           set -e
           ~/blender/blender --version
           echo "BLENDER_PATH=$HOME/blender/blender" >> "$GITHUB_ENV"
 
-      - name: Install Dependencies
+      - name: Install dependencies
         shell: bash
         run: |
           sudo apt-get update -y
@@ -90,305 +82,119 @@ jobs:
             libgomp1 \
             libosmesa6 \
             mesa-utils \
-            libglu1-mesa \
-            || true
+            libglu1-mesa
 
-      - name: Show GL Libraries
+      - name: Prepare output
+        shell: bash
+        run: mkdir -p output
+
+      - name: Test Blender
         shell: bash
         run: |
-          echo "=== GL Libraries ==="
-          ldconfig -p | grep -E "libGL|libEGL|libOSMesa" || true
-          echo ""
-          echo "=== Mesa version ==="
-          glxinfo 2>/dev/null | head -5 || echo "glxinfo not available"
-          echo ""
-          echo "=== osmesa check ==="
-          ls -la /usr/lib/x86_64-linux-gnu/libOSMesa* 2>/dev/null || echo "OSMesa not found at default path"
-          find /usr -name "libOSMesa*" 2>/dev/null || echo "OSMesa not found anywhere"
-
-      - name: Verify Script
-        shell: bash
-        run: |
-          set -e
-          if [ -f "${{ env.SCRIPT_PATH }}" ]; then
-            echo "Script OK — $(wc -l < "${{ env.SCRIPT_PATH }}") lines"
-          else
-            echo "ERROR: Script not found"
-            find . -name "*.py" | grep -v ".git"
-            exit 1
-          fi
-
-      - name: Prepare Output Directory
-        shell: bash
-        run: |
-          mkdir -p output
-
-      - name: Test Blender — Attempt 1 (llvmpipe)
-        id: test1
-        shell: bash
-        run: |
-          echo "=== Test 1: llvmpipe software renderer ==="
+          set -o pipefail
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
           MESA_GLSL_VERSION_OVERRIDE=330 \
-          LIBGL_DEBUG=verbose \
-          "${{ env.BLENDER_PATH }}" \
+          "$BLENDER_PATH" \
             --background \
             --factory-startup \
             --python-exit-code 1 \
             --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
-            2>&1 | tee /tmp/blender_test.log || true
+            2>&1 | tee /tmp/blender_test.log
 
-          echo "--- log ---"
-          cat /tmp/blender_test.log
+          grep -q "BLENDER_OK" /tmp/blender_test.log
 
-          if grep -q "BLENDER_OK" /tmp/blender_test.log; then
-            echo "TEST1_PASSED=true" >> "$GITHUB_ENV"
-            echo "PASSED"
-          else
-            echo "TEST1_PASSED=false" >> "$GITHUB_ENV"
-            echo "FAILED — trying next method"
-          fi
-
-      - name: Test Blender — Attempt 2 (softpipe fallback)
-        if: env.TEST1_PASSED == 'false'
-        shell: bash
-        run: |
-          echo "=== Test 2: softpipe fallback ==="
-          LIBGL_ALWAYS_SOFTWARE=1 \
-          GALLIUM_DRIVER=softpipe \
-          MESA_GL_VERSION_OVERRIDE=3.3 \
-          LIBGL_DEBUG=verbose \
-          "${{ env.BLENDER_PATH }}" \
-            --background \
-            --factory-startup \
-            --python-exit-code 1 \
-            --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
-            2>&1 | tee /tmp/blender_test2.log || true
-
-          echo "--- log ---"
-          cat /tmp/blender_test2.log
-
-          if grep -q "BLENDER_OK" /tmp/blender_test2.log; then
-            echo "TEST2_PASSED=true" >> "$GITHUB_ENV"
-            cp /tmp/blender_test2.log /tmp/blender_test.log
-            echo "PASSED"
-          else
-            echo "TEST2_PASSED=false" >> "$GITHUB_ENV"
-            echo "FAILED"
-          fi
-
-      - name: Test Blender — Attempt 3 (Xvfb + llvmpipe)
-        if: env.TEST1_PASSED == 'false' && env.TEST2_PASSED == 'false'
-        shell: bash
-        run: |
-          echo "=== Test 3: Xvfb + llvmpipe ==="
-          pkill Xvfb || true
-          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-          sleep 4
-
-          DISPLAY=:99 \
-          LIBGL_ALWAYS_SOFTWARE=1 \
-          GALLIUM_DRIVER=llvmpipe \
-          MESA_GL_VERSION_OVERRIDE=3.3 \
-          LIBGL_DEBUG=verbose \
-          "${{ env.BLENDER_PATH }}" \
-            --background \
-            --factory-startup \
-            --python-exit-code 1 \
-            --python-expr "import bpy; print('BLENDER_OK=' + bpy.app.version_string)" \
-            2>&1 | tee /tmp/blender_test3.log || true
-
-          pkill Xvfb || true
-
-          echo "--- log ---"
-          cat /tmp/blender_test3.log
-
-          if grep -q "BLENDER_OK" /tmp/blender_test3.log; then
-            echo "TEST3_PASSED=true" >> "$GITHUB_ENV"
-            cp /tmp/blender_test3.log /tmp/blender_test.log
-            echo "PASSED"
-          else
-            echo "TEST3_PASSED=false" >> "$GITHUB_ENV"
-            echo "FAILED — see log above for actual error"
-          fi
-
-      - name: Run Blender Pipeline
-        timeout-minutes: 70
+      - name: Run render pipeline
         shell: bash
         run: |
           set -o pipefail
-          echo "Starting render pipeline..."
-          mkdir -p "${{ github.workspace }}/output"
-
           LIBGL_ALWAYS_SOFTWARE=1 \
           GALLIUM_DRIVER=llvmpipe \
           MESA_GL_VERSION_OVERRIDE=3.3 \
           MESA_GLSL_VERSION_OVERRIDE=330 \
           LP_NUM_THREADS=4 \
-          "${{ env.BLENDER_PATH }}" \
+          "$BLENDER_PATH" \
             --background \
             --factory-startup \
             --python-exit-code 1 \
             --python "${{ env.SCRIPT_PATH }}" \
             -- \
             --output-dir "${{ github.workspace }}/output" \
+            --reference-image "${{ github.workspace }}/${{ env.REF_IMAGE }}" \
             2>&1 | tee /tmp/blender_output.log
 
-          BLENDER_EXIT=${PIPESTATUS[0]}
-          echo "Exit code: ${BLENDER_EXIT}"
-          echo ""
-          echo "=== Last 150 lines ==="
-          tail -150 /tmp/blender_output.log || true
-          echo ""
-          echo "=== Output files after Blender ==="
-          ls -lah "${{ github.workspace }}/output/" || true
-          exit "${BLENDER_EXIT}"
-
-      - name: Convert GLB to USDZ
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          GLB_PATH="${{ github.workspace }}/output/cryptopunk_character.glb"
-          USDZ_PATH="${{ github.workspace }}/output/cryptopunk_character.usdz"
-
-          if [ ! -f "$GLB_PATH" ]; then
-            echo "GLB missing, cannot convert to USDZ."
-            exit 0
-          fi
-
-          echo "=== Docker version ==="
-          docker --version
-
-          echo "=== Pull USDZ converter image ==="
-          docker pull marlon360/usd-from-gltf:latest
-
-          echo "=== Convert GLB -> USDZ ==="
-          docker run --rm \
-            -v "${{ github.workspace }}/output:/usr/app" \
-            marlon360/usd-from-gltf:latest \
-            cryptopunk_character.glb \
-            cryptopunk_character.usdz
-
-          echo "=== Output files after USDZ conversion ==="
-          ls -lah "${{ github.workspace }}/output/" || true
-
-          if [ -f "$USDZ_PATH" ]; then
-            echo "USDZ conversion: OK"
-          else
-            echo "USDZ conversion: FAILED"
-            exit 1
-          fi
-
-      - name: Verify Output Files
+      - name: Verify outputs
         shell: bash
         run: |
           set -e
-          ls -lah output/ || true
+          ls -lah output/
 
-          RENDER_OK=false
+          [ -f "output/character_render.png" ] && echo "PNG OK" || (echo "PNG missing" && exit 1)
+          [ -f "output/character_scene.blend" ] && echo "BLEND OK" || echo "BLEND missing"
+          [ -f "output/character_scene.glb" ] && echo "GLB OK" || echo "GLB missing"
 
-          [ -f "output/cryptopunk_character_render.png" ] \
-            && RENDER_OK=true && echo "PNG:   OK" \
-            || echo "PNG:   MISSING"
-
-          [ -f "output/cryptopunk_character.blend" ] \
-            && echo "BLEND: OK" \
-            || echo "BLEND: not generated"
-
-          [ -f "output/cryptopunk_character.usdz" ] \
-            && echo "USDZ:  OK" \
-            || echo "USDZ:  not generated"
-
-          [ -f "output/cryptopunk_character.glb" ] \
-            && echo "GLB:   OK" \
-            || echo "GLB:   not generated"
-
-          [ "$RENDER_OK" = false ] && echo "FATAL: PNG missing" && exit 1
-
-          echo "SUCCESS"
-
-      - name: Upload Debug Log
-        uses: actions/upload-artifact@v4
+      - name: Upload render
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-png
+          path: output/character_render.png
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload blend
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-blend
+          path: output/character_scene.blend
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload glb
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-glb
+          path: output/character_scene.glb
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload debug log
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: blender-debug-log
           path: /tmp/blender_output.log
-          retention-days: 7
           if-no-files-found: warn
+          retention-days: 7
 
-      - name: Upload Test Log
-        uses: actions/upload-artifact@v4
+      - name: Upload test log
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: blender-test-log
           path: /tmp/blender_test.log
+          if-no-files-found: warn
           retention-days: 7
-          if-no-files-found: warn
 
-      - name: Upload PNG Render
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: character-render-PNG
-          path: output/cryptopunk_character_render.png
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload Blender Scene
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: character-blender-scene
-          path: output/cryptopunk_character.blend
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload USDZ iPhone AR
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: character-iPhone-AR-USDZ
-          path: output/cryptopunk_character.usdz
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload GLB Web
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: character-web-GLB
-          path: output/cryptopunk_character.glb
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload All Outputs
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: all-outputs-bundle
-          path: output/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Job Summary
+      - name: Job summary
         if: always()
         shell: bash
         run: |
-          echo "## CryptoPunk Render Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "| File | Status |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
-
-          for f in \
-            "PNG:output/cryptopunk_character_render.png" \
-            "BLEND:output/cryptopunk_character.blend" \
-            "USDZ:output/cryptopunk_character.usdz" \
-            "GLB:output/cryptopunk_character.glb"; do
-            LABEL=$(echo "$f" | cut -d: -f1)
-            FILE=$(echo "$f" | cut -d: -f2)
-            [ -f "$FILE" ] && STATUS="✅ Ready" || STATUS="❌ Not generated"
-            echo "| $LABEL | $STATUS |" >> "$GITHUB_STEP_SUMMARY"
-          done
+          {
+            echo "## Render Results"
+            echo ""
+            echo "| File | Status |"
+            echo "|------|--------|"
+            for f in \
+              "PNG:output/character_render.png" \
+              "BLEND:output/character_scene.blend" \
+              "GLB:output/character_scene.glb"; do
+              LABEL=$(echo "$f" | cut -d: -f1)
+              FILE=$(echo "$f" | cut -d: -f2)
+              [ -f "$FILE" ] && STATUS="✅ Ready" || STATUS="❌ Missing"
+              echo "| $LABEL | $STATUS |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
