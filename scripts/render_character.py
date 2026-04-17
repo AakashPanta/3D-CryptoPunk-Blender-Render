@@ -381,7 +381,6 @@ if REFERENCE_IMAGE and os.path.exists(REFERENCE_IMAGE):
 # ============================================================
 print("Building subject...")
 
-# Head
 head = sphere("Head", (0.0, 0.00, 1.73), 0.40, scale=(1.05, 0.88, 1.12), mat=M_SKIN, seg=64, rings=32)
 add_subsurf(head, 2, 3)
 
@@ -390,24 +389,20 @@ chin_shadow = sphere("Stubble", (0.0, -0.31, 1.59), 0.10, scale=(1.18, 0.36, 0.4
 
 neck = cylinder("Neck", (0.0, -0.02, 1.28), 0.115, 0.24, rot=(math.radians(90), 0, 0), scale=(1.0, 0.82, 1.0), mat=M_SKIN, verts=24)
 
-# Hair
 hair = sphere("Hair", (-0.03, 0.03, 1.83), 0.39, scale=(1.02, 0.91, 0.88), mat=M_HAIR, seg=48, rings=24)
 
-# Ears and earring
 ear_l = sphere("EarL", (-0.43, -0.02, 1.76), 0.072, scale=(0.42, 0.22, 0.75), mat=M_SKIN, seg=16, rings=8)
 ear_r = sphere("EarR", (0.41, -0.04, 1.77), 0.065, scale=(0.34, 0.18, 0.62), mat=M_SKIN, seg=16, rings=8)
 earring = torus("Earring", (-0.456, -0.07, 1.70), 0.022, 0.006, rot=(math.radians(90), 0.0, math.radians(12)), mat=M_EARRING)
 
-# Eyes
 def build_eye(side, x, y, z, brow_rot):
-    eye_white = sphere(f"EyeWhite_{side}", (x, y, z), 0.078, scale=(1.10, 0.42, 0.80), mat=M_EYE_WHITE, seg=32, rings=16)
-    iris = sphere(f"Iris_{side}", (x + (0.003 if x > 0 else -0.002), y - 0.045, z - 0.004), 0.038, scale=(1.0, 0.22, 1.0), mat=M_IRIS, seg=24, rings=12)
-    pupil = sphere(f"Pupil_{side}", (x + (0.003 if x > 0 else -0.002), y - 0.052, z - 0.004), 0.020, scale=(1.0, 0.16, 1.0), mat=M_PUPIL, seg=16, rings=8)
-    shine1 = sphere(f"Shine1_{side}", (x - 0.013, y - 0.058, z + 0.016), 0.010, scale=(1.0, 0.12, 1.0), mat=M_SHINE, seg=12, rings=6)
-    shine2 = sphere(f"Shine2_{side}", (x + 0.014, y - 0.056, z - 0.010), 0.006, scale=(1.0, 0.10, 1.0), mat=M_SHINE, seg=10, rings=5)
-    brow = cube(f"Brow_{side}", (x + (0.012 if x > 0 else -0.012), y - 0.05, z + 0.13), scale=(0.105, 0.015, 0.022), rot=(math.radians(5), 0.0, math.radians(brow_rot)), mat=M_BROW)
-    lash = cube(f"Lash_{side}", (x + (0.015 if x > 0 else -0.015), y - 0.052, z + 0.060), scale=(0.088, 0.010, 0.010), rot=(math.radians(3), 0.0, math.radians(10 if x > 0 else -10)), mat=M_BROW)
-    return [eye_white, iris, pupil, shine1, shine2, brow, lash]
+    sphere(f"EyeWhite_{side}", (x, y, z), 0.078, scale=(1.10, 0.42, 0.80), mat=M_EYE_WHITE, seg=32, rings=16)
+    sphere(f"Iris_{side}", (x + (0.003 if x > 0 else -0.002), y - 0.045, z - 0.004), 0.038, scale=(1.0, 0.22, 1.0), mat=M_IRIS, seg=24, rings=12)
+    sphere(f"Pupil_{side}", (x + (0.003 if x > 0 else -0.002), y - 0.052, z - 0.004), 0.020, scale=(1.0, 0.16, 1.0), mat=M_PUPIL, seg=16, rings=8)
+    sphere(f"Shine1_{side}", (x - 0.013, y - 0.058, z + 0.016), 0.010, scale=(1.0, 0.12, 1.0), mat=M_SHINE, seg=12, rings=6)
+    sphere(f"Shine2_{side}", (x + 0.014, y - 0.056, z - 0.010), 0.006, scale=(1.0, 0.10, 1.0), mat=M_SHINE, seg=10, rings=5)
+    cube(f"Brow_{side}", (x + (0.012 if x > 0 else -0.012), y - 0.05, z + 0.13), scale=(0.105, 0.015, 0.022), rot=(math.radians(5), 0.0, math.radians(brow_rot)), mat=M_BROW)
+    cube(f"Lash_{side}", (x + (0.015 if x > 0 else -0.015), y - 0.052, z + 0.060), scale=(0.088, 0.010, 0.010), rot=(math.radians(3), 0.0, math.radians(10 if x > 0 else -10)), mat=M_BROW)
 
 build_eye("L", -0.128, -0.305, 1.82, -16)
 build_eye("R", 0.145, -0.330, 1.80, 16)
@@ -418,7 +413,6 @@ nose_tip = sphere("NoseTip", (0.05, -0.392, 1.71), 0.026, scale=(0.62, 0.42, 0.5
 lip_upper = sphere("LipUpper", (0.07, -0.368, 1.633), 0.040, scale=(1.10, 0.24, 0.34), mat=M_LIP, seg=18, rings=9)
 lip_lower = sphere("LipLower", (0.068, -0.362, 1.609), 0.036, scale=(1.00, 0.26, 0.28), mat=M_LIP, seg=18, rings=9)
 
-# Cap
 cap_dome = sphere("CapDome", (0.0, 0.0, 2.12), 0.43, scale=(1.04, 1.00, 0.72), mat=M_CAP, seg=48, rings=24)
 cap_band = cube("CapBand", (0.0, -0.10, 1.96), scale=(0.44, 0.10, 0.07), rot=(math.radians(7), 0, 0), mat=M_CAP)
 add_bevel(cap_band, width=0.01, segments=3)
@@ -439,40 +433,38 @@ apply_transforms(cap_under)
 assign_mat(cap_under, M_CAP_UNDER)
 smooth(cap_under)
 
-cap_button = sphere("CapButton", (0.0, 0.02, 2.42), 0.018, mat=M_CAP, seg=10, rings=5)
+sphere("CapButton", (0.0, 0.02, 2.42), 0.018, mat=M_CAP, seg=10, rings=5)
 logo_left = cube("LogoLeft", (-0.04, -0.377, 2.08), scale=(0.055, 0.012, 0.018), rot=(math.radians(8), math.radians(3), math.radians(38)), mat=M_CAP_LOGO)
 logo_right = cube("LogoRight", (0.065, -0.382, 2.105), scale=(0.108, 0.012, 0.018), rot=(math.radians(8), math.radians(2), math.radians(-24)), mat=M_CAP_LOGO)
 add_bevel(logo_left, width=0.004, segments=2)
 add_bevel(logo_right, width=0.004, segments=2)
 
-# Torso
-chest = cylinder("Chest", (0.00, -0.02, 1.00), 0.26, 0.66, rot=(math.radians(90), 0, 0), scale=(1.0, 0.82, 1.0), mat=M_WHITE, verts=32)
-shirt = cylinder("Shirt", (-0.01, -0.01, 1.02), 0.31, 0.62, rot=(math.radians(90), 0, 0), scale=(1.03, 0.84, 1.0), mat=M_GREEN, verts=32)
+cylinder("Chest", (0.00, -0.02, 1.00), 0.26, 0.66, rot=(math.radians(90), 0, 0), scale=(1.0, 0.82, 1.0), mat=M_WHITE, verts=32)
+cylinder("Shirt", (-0.01, -0.01, 1.02), 0.31, 0.62, rot=(math.radians(90), 0, 0), scale=(1.03, 0.84, 1.0), mat=M_GREEN, verts=32)
 
-shirt_l = cube("ShirtL", (-0.16, -0.22, 1.05), scale=(0.12, 0.03, 0.31), rot=(math.radians(-8), 0, math.radians(4)), mat=M_GREEN)
-shirt_r = cube("ShirtR", (0.12, -0.21, 1.03), scale=(0.10, 0.03, 0.29), rot=(math.radians(-8), 0, math.radians(-4)), mat=M_GREEN)
-collar_l = cube("CollarL", (-0.10, -0.27, 1.36), scale=(0.09, 0.018, 0.11), rot=(math.radians(-32), math.radians(4), math.radians(18)), mat=M_GREEN)
-collar_r = cube("CollarR", (0.10, -0.28, 1.34), scale=(0.08, 0.018, 0.10), rot=(math.radians(-28), math.radians(-4), math.radians(-14)), mat=M_GREEN)
-inner_black = cube("InnerBlack", (0.00, -0.18, 0.95), scale=(0.05, 0.018, 0.26), mat=M_DARK)
+cube("ShirtL", (-0.16, -0.22, 1.05), scale=(0.12, 0.03, 0.31), rot=(math.radians(-8), 0, math.radians(4)), mat=M_GREEN)
+cube("ShirtR", (0.12, -0.21, 1.03), scale=(0.10, 0.03, 0.29), rot=(math.radians(-8), 0, math.radians(-4)), mat=M_GREEN)
+cube("CollarL", (-0.10, -0.27, 1.36), scale=(0.09, 0.018, 0.11), rot=(math.radians(-32), math.radians(4), math.radians(18)), mat=M_GREEN)
+cube("CollarR", (0.10, -0.28, 1.34), scale=(0.08, 0.018, 0.10), rot=(math.radians(-28), math.radians(-4), math.radians(-14)), mat=M_GREEN)
+cube("InnerBlack", (0.00, -0.18, 0.95), scale=(0.05, 0.018, 0.26), mat=M_DARK)
 
 for i, z in enumerate([1.22, 1.08, 0.95]):
     sphere(f"Button_{i}", (-0.035, -0.300, z), 0.016, scale=(1.0, 0.35, 1.0), mat=M_WHITE, seg=12, rings=6)
 
-# Arms
-shoulder_l = sphere("ShoulderL", (-0.38, -0.02, 1.18), 0.14, scale=(0.9, 0.8, 0.8), mat=M_GREEN, seg=24, rings=12)
-upper_l = cylinder("UpperL", (-0.50, -0.02, 0.98), 0.085, 0.30, rot=(math.radians(10), 0, math.radians(20)), mat=M_GREEN, verts=20)
-fore_l = cylinder("ForeL", (-0.58, -0.04, 0.77), 0.065, 0.25, rot=(math.radians(12), 0, math.radians(18)), mat=M_SKIN, verts=20)
-hand_l = sphere("HandL", (-0.62, -0.07, 0.60), 0.07, scale=(0.8, 0.52, 0.75), mat=M_SKIN, seg=18, rings=9)
+sphere("ShoulderL", (-0.38, -0.02, 1.18), 0.14, scale=(0.9, 0.8, 0.8), mat=M_GREEN, seg=24, rings=12)
+cylinder("UpperL", (-0.50, -0.02, 0.98), 0.085, 0.30, rot=(math.radians(10), 0, math.radians(20)), mat=M_GREEN, verts=20)
+cylinder("ForeL", (-0.58, -0.04, 0.77), 0.065, 0.25, rot=(math.radians(12), 0, math.radians(18)), mat=M_SKIN, verts=20)
+sphere("HandL", (-0.62, -0.07, 0.60), 0.07, scale=(0.8, 0.52, 0.75), mat=M_SKIN, seg=18, rings=9)
 
-shoulder_r = sphere("ShoulderR", (0.30, -0.04, 1.12), 0.14, scale=(0.95, 0.85, 0.82), mat=M_GREEN, seg=24, rings=12)
-upper_r = cylinder("UpperR", (0.42, -0.14, 0.99), 0.09, 0.28, rot=(math.radians(-28), 0, math.radians(-22)), mat=M_GREEN, verts=20)
-fore_r = cylinder("ForeR", (0.54, -0.28, 0.84), 0.072, 0.25, rot=(math.radians(-44), 0, math.radians(-18)), mat=M_SKIN, verts=20)
+sphere("ShoulderR", (0.30, -0.04, 1.12), 0.14, scale=(0.95, 0.85, 0.82), mat=M_GREEN, seg=24, rings=12)
+cylinder("UpperR", (0.42, -0.14, 0.99), 0.09, 0.28, rot=(math.radians(-28), 0, math.radians(-22)), mat=M_GREEN, verts=20)
+cylinder("ForeR", (0.54, -0.28, 0.84), 0.072, 0.25, rot=(math.radians(-44), 0, math.radians(-18)), mat=M_SKIN, verts=20)
 
-wrist_blue = torus("WristBlue", (0.58, -0.31, 0.69), 0.082, 0.018, rot=(math.radians(58), 0, math.radians(14)), mat=M_WRIST_BLUE)
-wrist_white = torus("WristWhite", (0.582, -0.31, 0.69), 0.065, 0.008, rot=(math.radians(58), 0, math.radians(14)), mat=M_WRIST_WHITE)
+torus("WristBlue", (0.58, -0.31, 0.69), 0.082, 0.018, rot=(math.radians(58), 0, math.radians(14)), mat=M_WRIST_BLUE)
+torus("WristWhite", (0.582, -0.31, 0.69), 0.065, 0.008, rot=(math.radians(58), 0, math.radians(14)), mat=M_WRIST_WHITE)
 
-hand_r = sphere("HandR", (0.67, -0.38, 0.63), 0.10, scale=(0.98, 0.70, 0.78), mat=M_SKIN, seg=24, rings=12)
-thumb_r = cylinder("ThumbR", (0.62, -0.34, 0.62), 0.018, 0.08, rot=(math.radians(10), math.radians(72), math.radians(-10)), mat=M_SKIN, verts=12)
+sphere("HandR", (0.67, -0.38, 0.63), 0.10, scale=(0.98, 0.70, 0.78), mat=M_SKIN, seg=24, rings=12)
+cylinder("ThumbR", (0.62, -0.34, 0.62), 0.018, 0.08, rot=(math.radians(10), math.radians(72), math.radians(-10)), mat=M_SKIN, verts=12)
 
 for i, (fx, fy, fz, rx) in enumerate([
     (0.714, -0.402, 0.67, -64),
@@ -482,22 +474,20 @@ for i, (fx, fy, fz, rx) in enumerate([
 ]):
     cylinder(f"Finger_{i}", (fx, fy, fz), 0.014, 0.072, rot=(math.radians(rx), 0, math.radians(10)), mat=M_SKIN, verts=12)
 
-# Lighter
 lighter_body = cube("LighterBody", (0.73, -0.42, 0.64), scale=(0.06, 0.03, 0.115), rot=(math.radians(2), math.radians(4), math.radians(8)), mat=M_LIGHTER_RED)
 add_bevel(lighter_body, width=0.008, segments=3)
 
 lighter_top = cube("LighterTop", (0.733, -0.420, 0.760), scale=(0.05, 0.025, 0.028), rot=(math.radians(2), math.radians(4), math.radians(8)), mat=M_CHROME)
 add_bevel(lighter_top, width=0.004, segments=2)
 
-lighter_wheel = cylinder("LighterWheel", (0.720, -0.401, 0.776), 0.010, 0.020, rot=(math.radians(90), 0, math.radians(10)), mat=M_CHROME, verts=14)
+cylinder("LighterWheel", (0.720, -0.401, 0.776), 0.010, 0.020, rot=(math.radians(90), 0, math.radians(10)), mat=M_CHROME, verts=14)
 
-flame_inner = sphere("FlameInner", (0.73, -0.43, 0.815), 0.018, scale=(0.45, 0.35, 1.35), mat=M_FLAME, seg=12, rings=6)
-flame_outer = sphere("FlameOuter", (0.73, -0.43, 0.832), 0.024, scale=(0.55, 0.45, 1.45), mat=M_FLAME_OUTER, seg=12, rings=6)
+sphere("FlameInner", (0.73, -0.43, 0.815), 0.018, scale=(0.45, 0.35, 1.35), mat=M_FLAME, seg=12, rings=6)
+sphere("FlameOuter", (0.73, -0.43, 0.832), 0.024, scale=(0.55, 0.45, 1.45), mat=M_FLAME_OUTER, seg=12, rings=6)
 
-# Cigarette and smoke
-cig_body = cylinder("CigBody", (0.39, -0.386, 1.64), 0.018, 0.29, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_WHITE, verts=24)
-cig_filter = cylinder("CigFilter", (0.27, -0.375, 1.64), 0.0185, 0.075, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_FILTER, verts=24)
-cig_ember = cylinder("CigEmber", (0.52, -0.397, 1.64), 0.015, 0.020, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_EMBER, verts=20)
+cylinder("CigBody", (0.39, -0.386, 1.64), 0.018, 0.29, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_WHITE, verts=24)
+cylinder("CigFilter", (0.27, -0.375, 1.64), 0.0185, 0.075, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_FILTER, verts=24)
+cylinder("CigEmber", (0.52, -0.397, 1.64), 0.015, 0.020, rot=(math.radians(86), math.radians(8), math.radians(4)), mat=M_CIG_EMBER, verts=20)
 
 curve_smoke("Smoke0", [(0.55, -0.39, 1.67), (0.67, -0.27, 1.74), (0.79, -0.22, 1.84), (0.90, -0.18, 1.98)], 0.014, M_SMOKE)
 curve_smoke("Smoke1", [(0.57, -0.37, 1.65), (0.67, -0.30, 1.77), (0.76, -0.26, 1.92), (0.83, -0.18, 2.06)], 0.011, M_SMOKE)
@@ -544,11 +534,11 @@ for i, spec in enumerate([
 # ============================================================
 print("Building lights...")
 
-key = area_light("Key", (-1.2, -2.1, 2.5), (math.radians(62), math.radians(2), math.radians(20)), 4500, 2.3, (1.0, 0.88, 0.76))
-fill = area_light("Fill", (1.9, -1.7, 1.8), (math.radians(76), 0, math.radians(-34)), 1500, 2.8, (0.68, 0.76, 1.0))
-rim = area_light("Rim", (0.8, 1.6, 2.4), (math.radians(-108), 0, math.radians(12)), 2200, 1.8, (1.0, 0.74, 0.45))
-flame_light = point_light("FlameLight", (0.73, -0.43, 0.82), 350, (1.0, 0.45, 0.10), 0.06)
-ember_light = point_light("EmberLight", (0.53, -0.39, 1.65), 120, (1.0, 0.28, 0.05), 0.04)
+area_light("Key", (-1.2, -2.1, 2.5), (math.radians(62), math.radians(2), math.radians(20)), 4500, 2.3, (1.0, 0.88, 0.76))
+area_light("Fill", (1.9, -1.7, 1.8), (math.radians(76), 0, math.radians(-34)), 1500, 2.8, (0.68, 0.76, 1.0))
+area_light("Rim", (0.8, 1.6, 2.4), (math.radians(-108), 0, math.radians(12)), 2200, 1.8, (1.0, 0.74, 0.45))
+point_light("FlameLight", (0.73, -0.43, 0.82), 350, (1.0, 0.45, 0.10), 0.06)
+point_light("EmberLight", (0.53, -0.39, 1.65), 120, (1.0, 0.28, 0.05), 0.04)
 
 # ============================================================
 # CAMERA
@@ -613,52 +603,82 @@ def setup_compositor(scene_obj):
     rl = nodes.new(type="CompositorNodeRLayers")
     rl.location = (-500, 0)
 
-    glare = nodes.new(type="CompositorNodeGlare")
-    glare.location = (-220, 0)
-    glare.glare_type = 'FOG_GLOW'
-    glare.quality = 'HIGH'
-    glare.threshold = 0.78
-    glare.size = 7
-    links.new(rl.outputs["Image"], glare.inputs["Image"])
+    last_out = rl.outputs["Image"]
 
-    lens = nodes.new(type="CompositorNodeLensdist")
-    lens.location = (20, 0)
     try:
-        lens.inputs[1].default_value = -0.008
-        lens.inputs[2].default_value = 0.002
-    except Exception:
-        pass
-    links.new(glare.outputs["Image"], lens.inputs["Image"])
+        glare = nodes.new(type="CompositorNodeGlare")
+        glare.location = (-220, 0)
+        glare.glare_type = 'FOG_GLOW'
+        glare.quality = 'HIGH'
+        glare.threshold = 0.78
+        glare.size = 7
+        links.new(last_out, glare.inputs["Image"])
+        last_out = glare.outputs["Image"]
+        print("Glare: OK")
+    except Exception as e:
+        print(f"Glare skipped: {e}")
 
-    cb = nodes.new(type="CompositorNodeColorBalance")
-    cb.location = (260, 0)
-    cb.correction_method = 'LIFT_GAMMA_GAIN'
-    cb.lift = (0.98, 0.99, 1.02, 1.0)
-    cb.gamma = (1.02, 1.00, 0.98, 1.0)
-    cb.gain = (1.04, 1.02, 0.98, 1.0)
-    links.new(lens.outputs["Image"], cb.inputs["Image"])
+    try:
+        lens = nodes.new(type="CompositorNodeLensdist")
+        lens.location = (20, 0)
+        try:
+            lens.inputs[1].default_value = -0.008
+            lens.inputs[2].default_value = 0.002
+        except Exception:
+            pass
+        links.new(last_out, lens.inputs["Image"])
+        last_out = lens.outputs["Image"]
+        print("Lens distortion: OK")
+    except Exception as e:
+        print(f"Lens distortion skipped: {e}")
 
-    ellipse = nodes.new(type="CompositorNodeEllipseMask")
-    ellipse.location = (260, -260)
-    ellipse.width = 0.88
-    ellipse.height = 0.84
+    try:
+        cb = nodes.new(type="CompositorNodeColorBalance")
+        cb.location = (260, 0)
+        cb.correction_method = 'LIFT_GAMMA_GAIN'
+        cb.lift = (0.98, 0.99, 1.02)
+        cb.gamma = (1.02, 1.00, 0.98)
+        cb.gain = (1.04, 1.02, 0.98)
+        links.new(last_out, cb.inputs["Image"])
+        last_out = cb.outputs["Image"]
+        print("Color balance: OK")
+    except Exception as e:
+        print(f"Color balance skipped: {e}")
 
-    blur = nodes.new(type="CompositorNodeBlur")
-    blur.location = (460, -260)
-    blur.size_x = 160
-    blur.size_y = 160
-    links.new(ellipse.outputs["Mask"], blur.inputs["Image"])
+    try:
+        ellipse = nodes.new(type="CompositorNodeEllipseMask")
+        ellipse.location = (260, -260)
+        ellipse.width = 0.88
+        ellipse.height = 0.84
 
-    mix = nodes.new(type="CompositorNodeMixRGB")
-    mix.location = (520, 0)
-    mix.blend_type = 'MULTIPLY'
-    mix.inputs[0].default_value = 0.34
-    links.new(cb.outputs["Image"], mix.inputs[1])
-    links.new(blur.outputs["Image"], mix.inputs[2])
+        blur = nodes.new(type="CompositorNodeBlur")
+        blur.location = (460, -260)
+        blur.size_x = 160
+        blur.size_y = 160
+        links.new(ellipse.outputs["Mask"], blur.inputs["Image"])
+
+        mix = nodes.new(type="CompositorNodeMixRGB")
+        mix.location = (520, 0)
+        mix.blend_type = 'MULTIPLY'
+        mix.inputs[0].default_value = 0.34
+        links.new(last_out, mix.inputs[1])
+        links.new(blur.outputs["Image"], mix.inputs[2])
+        last_out = mix.outputs["Image"]
+        print("Vignette: OK")
+    except Exception as e:
+        print(f"Vignette skipped: {e}")
 
     comp = nodes.new(type="CompositorNodeComposite")
     comp.location = (760, 0)
-    links.new(mix.outputs["Image"], comp.inputs["Image"])
+    links.new(last_out, comp.inputs["Image"])
+
+    try:
+        viewer = nodes.new(type="CompositorNodeViewer")
+        viewer.location = (760, -140)
+        links.new(last_out, viewer.inputs["Image"])
+    except Exception:
+        pass
+
 
 setup_compositor(scene)
 
