@@ -110,12 +110,12 @@ def make_mat(name, base_color,
                     pass
                 break
         if subsurface_color:
-            for k in ['Subsurface Color']:
-                if k in bsdf.inputs:
-                    try:
-                        bsdf.inputs[k].default_value = (*subsurface_color, 1.0)
-                    except Exception:
-                        pass
+            if 'Subsurface Color' in bsdf.inputs:
+                try:
+                    bsdf.inputs['Subsurface Color'].default_value = (
+                        *subsurface_color, 1.0)
+                except Exception:
+                    pass
 
     if emission_strength > 0 and emission_color:
         for k in ['Emission Color', 'Emission']:
@@ -125,104 +125,79 @@ def make_mat(name, base_color,
                 except Exception:
                     pass
                 break
-        for k in ['Emission Strength']:
-            if k in bsdf.inputs:
-                try:
-                    bsdf.inputs[k].default_value = emission_strength
-                except Exception:
-                    pass
+        if 'Emission Strength' in bsdf.inputs:
+            try:
+                bsdf.inputs['Emission Strength'].default_value = emission_strength
+            except Exception:
+                pass
 
     links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     mat_cache[name] = mat
     return mat
 
 
-# ── All character materials ──────────────────────────────────
-
+# ── Materials ────────────────────────────────────────────────
 M_SKIN = make_mat('Skin',
     base_color=(0.91, 0.73, 0.56), roughness=0.55,
     subsurface=0.35, subsurface_color=(0.95, 0.60, 0.45))
-
 M_SKIN_DARK = make_mat('SkinDark',
     base_color=(0.78, 0.60, 0.44), roughness=0.6,
     subsurface=0.2, subsurface_color=(0.85, 0.50, 0.35))
-
 M_EYE_SCLERA = make_mat('EyeSclera',
     base_color=(0.95, 0.94, 0.92), roughness=0.15,
     subsurface=0.1, subsurface_color=(0.95, 0.90, 0.88))
-
 M_EYE_IRIS = make_mat('EyeIris',
     base_color=(0.28, 0.24, 0.10), roughness=0.05)
-
 M_EYE_PUPIL = make_mat('EyePupil',
     base_color=(0.01, 0.01, 0.01), roughness=0.05)
-
 M_EYE_CORNEA = make_mat('EyeCornea',
     base_color=(0.95, 0.95, 0.98), roughness=0.0,
     transmission=0.95, ior=1.38, alpha=0.1)
-
 M_BROW = make_mat('Eyebrow',
     base_color=(0.08, 0.06, 0.04), roughness=0.8)
-
 M_LIP = make_mat('Lips',
     base_color=(0.82, 0.58, 0.48), roughness=0.5,
     subsurface=0.2, subsurface_color=(0.90, 0.55, 0.45))
-
 M_CAP_NAVY = make_mat('CapNavy',
     base_color=(0.08, 0.12, 0.38), roughness=0.75)
-
 M_CAP_BRIM = make_mat('CapBrim',
     base_color=(0.05, 0.08, 0.28), roughness=0.7)
-
 M_CHECK = make_mat('Checkmark',
     base_color=(0.95, 0.95, 0.97), roughness=0.25,
     emission_color=(0.95, 0.95, 0.97), emission_strength=0.5)
-
 M_HAIR = make_mat('Hair',
     base_color=(0.06, 0.04, 0.03), roughness=0.65)
-
 M_SHIRT_GREEN = make_mat('ShirtGreen',
     base_color=(0.28, 0.60, 0.08), roughness=0.7)
-
 M_SHIRT_WHITE = make_mat('ShirtWhite',
     base_color=(0.88, 0.88, 0.86), roughness=0.65)
-
 M_EARRING = make_mat('Earring',
     base_color=(0.02, 0.02, 0.02), roughness=0.2, metallic=0.8)
-
 M_WRISTBAND = make_mat('Wristband',
     base_color=(0.15, 0.35, 0.75), roughness=0.6)
-
 M_WRISTBAND_WHITE = make_mat('WristbandWhite',
     base_color=(0.88, 0.88, 0.90), roughness=0.55)
-
 M_CIG_PAPER = make_mat('CigPaper',
     base_color=(0.90, 0.88, 0.82), roughness=0.75)
-
 M_CIG_TIP = make_mat('CigTip',
     base_color=(0.95, 0.40, 0.05), roughness=0.4,
     emission_color=(1.0, 0.50, 0.05), emission_strength=4.0)
-
 M_LIGHTER_RED = make_mat('LighterRed',
     base_color=(0.80, 0.05, 0.05), roughness=0.2)
-
 M_LIGHTER_CHROME = make_mat('LighterChrome',
     base_color=(0.75, 0.75, 0.78), roughness=0.12, metallic=0.95)
-
 M_FLAME = make_mat('Flame',
     base_color=(1.0, 0.65, 0.08), roughness=0.0,
     emission_color=(1.0, 0.55, 0.05), emission_strength=20.0)
-
 M_SMOKE = make_mat('Smoke',
     base_color=(0.75, 0.75, 0.78), roughness=0.95, alpha=0.35)
-
 M_BG = make_mat('Background',
     base_color=(0.02, 0.02, 0.04), roughness=0.9)
 
 print(f"Created {len(mat_cache)} materials")
 
 # ============================================================
-# HELPER FUNCTIONS
+# HELPERS
 # ============================================================
 
 def assign_mat(obj, mat):
@@ -288,7 +263,7 @@ def add_cylinder(name, mat, location, radius=1.0, depth=1.0,
 # ============================================================
 print("Building character...")
 
-# ── HEAD ─────────────────────────────────────────────────────
+# Head
 head = add_sphere('Head', M_SKIN, location=(0, 0, 1.75),
                   radius=0.38, segments=64, rings=32)
 head.scale = (1.0, 0.88, 1.08)
@@ -298,17 +273,15 @@ neck = add_cylinder('Neck', M_SKIN, location=(0, 0.02, 1.32),
                     radius=0.12, depth=0.22, verts=24)
 add_subsurf(neck, levels=1, render_levels=2)
 
-# ── EYES ─────────────────────────────────────────────────────
+# Eyes
 eye_l_white = add_sphere('EyeL_Sclera', M_EYE_SCLERA,
                           location=(-0.13, -0.30, 1.82),
                           radius=0.065, segments=32, rings=16)
 eye_l_white.scale = (1.0, 0.85, 0.75)
-
 eye_l_iris = add_sphere('EyeL_Iris', M_EYE_IRIS,
                          location=(-0.13, -0.355, 1.82),
                          radius=0.042, segments=24, rings=12)
 eye_l_iris.scale = (1.0, 0.3, 0.85)
-
 eye_l_pupil = add_sphere('EyeL_Pupil', M_EYE_PUPIL,
                           location=(-0.13, -0.365, 1.82),
                           radius=0.025, segments=16, rings=8)
@@ -318,61 +291,55 @@ eye_r_white = add_sphere('EyeR_Sclera', M_EYE_SCLERA,
                           location=(0.13, -0.30, 1.82),
                           radius=0.065, segments=32, rings=16)
 eye_r_white.scale = (1.0, 0.85, 0.75)
-
 eye_r_iris = add_sphere('EyeR_Iris', M_EYE_IRIS,
                          location=(0.13, -0.355, 1.82),
                          radius=0.042, segments=24, rings=12)
 eye_r_iris.scale = (1.0, 0.3, 0.85)
-
 eye_r_pupil = add_sphere('EyeR_Pupil', M_EYE_PUPIL,
                           location=(0.13, -0.365, 1.82),
                           radius=0.025, segments=16, rings=8)
 eye_r_pupil.scale = (1.0, 0.2, 0.8)
 
-# ── EYEBROWS ─────────────────────────────────────────────────
+# Eyebrows
 brow_l = add_cube('BrowL', M_BROW,
                    location=(-0.13, -0.355, 1.895),
                    scale=(0.075, 0.012, 0.018),
                    rotation=(0, math.radians(-8), math.radians(-12)))
-
 brow_r = add_cube('BrowR', M_BROW,
                    location=(0.13, -0.355, 1.895),
                    scale=(0.075, 0.012, 0.018),
                    rotation=(0, math.radians(8), math.radians(12)))
 
-# ── NOSE ─────────────────────────────────────────────────────
+# Nose
 nose = add_sphere('Nose', M_SKIN,
                    location=(0, -0.375, 1.73),
                    radius=0.035, segments=16, rings=8)
 nose.scale = (0.7, 0.6, 0.5)
 
-# ── LIPS ─────────────────────────────────────────────────────
+# Lips
 lip_upper = add_sphere('LipUpper', M_LIP,
                         location=(0, -0.37, 1.66),
                         radius=0.055, segments=16, rings=8)
 lip_upper.scale = (1.2, 0.4, 0.4)
-
 lip_lower = add_sphere('LipLower', M_LIP,
                         location=(0, -0.365, 1.635),
                         radius=0.052, segments=16, rings=8)
 lip_lower.scale = (1.1, 0.45, 0.35)
 
-# ── EARS ─────────────────────────────────────────────────────
+# Ears
 ear_l = add_sphere('EarL', M_SKIN,
                     location=(-0.375, 0.02, 1.76),
                     radius=0.07, segments=16, rings=8)
 ear_l.scale = (0.4, 0.25, 0.65)
-
 ear_r = add_sphere('EarR', M_SKIN,
                     location=(0.375, 0.02, 1.76),
                     radius=0.07, segments=16, rings=8)
 ear_r.scale = (0.4, 0.25, 0.65)
-
 earring = add_sphere('Earring', M_EARRING,
                       location=(-0.395, 0.02, 1.73),
                       radius=0.018, segments=12, rings=6)
 
-# ── CAP ──────────────────────────────────────────────────────
+# Cap
 cap_dome = add_sphere('CapDome', M_CAP_NAVY,
                        location=(0, 0.04, 2.02),
                        radius=0.40, segments=48, rings=24)
@@ -393,19 +360,18 @@ check_l = add_cube('CheckL', M_CHECK,
                     location=(-0.06, -0.37, 2.02),
                     scale=(0.055, 0.008, 0.022),
                     rotation=(math.radians(10), 0, math.radians(35)))
-
 check_r = add_cube('CheckR', M_CHECK,
                     location=(0.04, -0.375, 2.05),
                     scale=(0.08, 0.008, 0.018),
                     rotation=(math.radians(10), 0, math.radians(-20)))
 
-# ── HAIR ─────────────────────────────────────────────────────
+# Hair
 hair_base = add_sphere('HairBase', M_HAIR,
                         location=(0, 0.05, 1.78),
                         radius=0.385, segments=32, rings=16)
 hair_base.scale = (1.01, 0.90, 1.0)
 
-# ── TORSO ────────────────────────────────────────────────────
+# Torso
 bpy.ops.mesh.primitive_cylinder_add(
     radius=0.32, depth=0.65, vertices=32,
     location=(0, 0.04, 1.0))
@@ -430,7 +396,6 @@ collar_l = add_cube('CollarL', M_SHIRT_GREEN,
                      location=(-0.10, -0.28, 1.38),
                      scale=(0.08, 0.02, 0.12),
                      rotation=(math.radians(-25), 0, math.radians(15)))
-
 collar_r = add_cube('CollarR', M_SHIRT_GREEN,
                      location=(0.10, -0.28, 1.38),
                      scale=(0.08, 0.02, 0.12),
@@ -441,17 +406,15 @@ for i, bz in enumerate([1.18, 1.08, 0.98]):
                location=(0, -0.335, bz),
                radius=0.012, segments=8, rings=4)
 
-# ── SHOULDERS & ARMS ─────────────────────────────────────────
+# Arms
 l_shoulder = add_sphere('ShoulderL', M_SHIRT_GREEN,
                           location=(-0.38, 0.02, 1.22),
                           radius=0.16, segments=24, rings=12)
 l_shoulder.scale = (0.85, 0.75, 0.8)
-
 l_upper_arm = add_cylinder('UpperArmL', M_SHIRT_GREEN,
                              location=(-0.42, 0.02, 1.05),
                              radius=0.10, depth=0.28,
                              rotation=(math.radians(5), 0, math.radians(12)))
-
 l_forearm = add_cylinder('ForearmL', M_SKIN,
                           location=(-0.44, 0.0, 0.82),
                           radius=0.075, depth=0.26,
@@ -462,30 +425,27 @@ r_shoulder = add_sphere('ShoulderR', M_SHIRT_GREEN,
                           location=(0.38, 0.02, 1.22),
                           radius=0.16, segments=24, rings=12)
 r_shoulder.scale = (0.85, 0.75, 0.8)
-
 r_upper_arm = add_cylinder('UpperArmR', M_SHIRT_GREEN,
                              location=(0.40, -0.05, 1.08),
                              radius=0.10, depth=0.28,
                              rotation=(math.radians(-20), 0, math.radians(-15)))
-
 r_forearm = add_cylinder('ForearmR', M_SKIN,
                           location=(0.38, -0.12, 0.88),
                           radius=0.072, depth=0.24,
                           rotation=(math.radians(-35), 0, math.radians(-12)))
 add_subsurf(r_forearm, levels=1, render_levels=2)
 
-# ── WRISTBAND ────────────────────────────────────────────────
+# Wristband
 wrist_band = add_cylinder('WristbandMain', M_WRISTBAND,
                            location=(0.36, -0.20, 0.76),
                            radius=0.082, depth=0.055,
                            rotation=(math.radians(-35), 0, math.radians(-12)))
-
 wrist_stripe = add_cylinder('WristbandStripe', M_WRISTBAND_WHITE,
                               location=(0.36, -0.20, 0.77),
                               radius=0.083, depth=0.018,
                               rotation=(math.radians(-35), 0, math.radians(-12)))
 
-# ── HANDS ────────────────────────────────────────────────────
+# Hands
 r_hand = add_sphere('HandR', M_SKIN,
                      location=(0.34, -0.28, 0.68),
                      radius=0.085, segments=24, rings=12)
@@ -505,33 +465,30 @@ l_hand = add_sphere('HandL', M_SKIN,
                      radius=0.06, segments=16, rings=8)
 l_hand.scale = (0.5, 0.4, 0.35)
 
-# ── LIGHTER ──────────────────────────────────────────────────
+# Lighter
 lighter_body = add_cube('LighterBody', M_LIGHTER_RED,
                           location=(0.34, -0.32, 0.60),
                           scale=(0.038, 0.022, 0.075))
 add_bevel(lighter_body, width=0.008, segments=3)
-
 lighter_top = add_cube('LighterTop', M_LIGHTER_CHROME,
                          location=(0.34, -0.32, 0.678),
                          scale=(0.036, 0.020, 0.022))
 add_bevel(lighter_top, width=0.005, segments=2)
-
 flame = add_sphere('Flame', M_FLAME,
                     location=(0.34, -0.32, 0.72),
                     radius=0.022, segments=12, rings=6)
 flame.scale = (0.6, 0.5, 1.4)
 
-# ── CIGARETTE ────────────────────────────────────────────────
+# Cigarette
 cig = add_cylinder('Cigarette', M_CIG_PAPER,
                     location=(-0.04, -0.375, 1.645),
                     radius=0.008, depth=0.12,
                     rotation=(0, math.radians(85), math.radians(15)))
-
 cig_tip = add_sphere('CigTip', M_CIG_TIP,
                       location=(0.04, -0.375, 1.648),
                       radius=0.010, segments=8, rings=4)
 
-# ── SMOKE ────────────────────────────────────────────────────
+# Smoke
 smoke_positions = [
     (0.08, -0.37, 1.68, 0.022),
     (0.12, -0.36, 1.72, 0.030),
@@ -549,7 +506,7 @@ for i, (sx, sy, sz, sr) in enumerate(smoke_positions):
 print("Character built")
 
 # ============================================================
-# BACKGROUND ENVIRONMENT
+# ENVIRONMENT
 # ============================================================
 print("Building environment...")
 
@@ -563,8 +520,7 @@ assign_mat(bg, M_BG)
 bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, 0.0))
 floor = bpy.context.active_object
 floor.name = "Floor"
-mat_floor = make_mat('Floor', (0.02, 0.02, 0.03),
-                     roughness=0.2, metallic=0.0)
+mat_floor = make_mat('Floor', (0.02, 0.02, 0.03), roughness=0.2)
 assign_mat(floor, mat_floor)
 
 bokeh_positions = [
@@ -577,12 +533,9 @@ bokeh_positions = [
 ]
 for i, (bx, by, bz, bc, br) in enumerate(bokeh_positions):
     mat_bokeh = make_mat(f'Bokeh_{i}', bc,
-                          emission_color=bc,
-                          emission_strength=8.0,
-                          roughness=0.0)
-    b_sphere = add_sphere(f'Bokeh_{i}', mat_bokeh,
-                           location=(bx, by, bz),
-                           radius=br, segments=8, rings=4)
+                          emission_color=bc, emission_strength=8.0)
+    add_sphere(f'Bokeh_{i}', mat_bokeh,
+               location=(bx, by, bz), radius=br, segments=8, rings=4)
 
 # ============================================================
 # LIGHTING
@@ -683,30 +636,31 @@ scene.render.image_settings.file_format = 'PNG'
 scene.render.image_settings.color_mode  = 'RGBA'
 scene.render.image_settings.compression = 10
 
-# Tile size (3.x only — ignored safely in newer versions)
 try:
     scene.cycles.tile_x = 128
     scene.cycles.tile_y = 128
 except AttributeError:
     pass
 
-# ── Color management — SAFE for 3.6 ─────────────────────────
+# Color management — safe for 3.6
 scene.view_settings.view_transform = 'Filmic'
 scene.view_settings.exposure = 0.2
 scene.view_settings.gamma    = 1.0
 
-# Safe look setter — only apply if the look actually exists
-available_looks = [l.name for l in bpy.types.ColorManagedViewSettings.bl_rna.properties['look'].enum_items]
-desired_look = 'High Contrast'
-if desired_look in available_looks:
-    scene.view_settings.look = desired_look
-else:
-    # Fallback: use whatever is available
-    for fallback in ['Medium High Contrast', 'Medium Contrast', 'None']:
-        if fallback in available_looks:
-            scene.view_settings.look = fallback
-            print(f"Color look: using '{fallback}' instead of '{desired_look}'")
+try:
+    looks = [
+        l.identifier
+        for l in bpy.types.ColorManagedViewSettings.bl_rna
+                        .properties['look'].enum_items
+    ]
+    for candidate in ['High Contrast', 'Medium High Contrast',
+                      'Medium Contrast', 'None']:
+        if candidate in looks:
+            scene.view_settings.look = candidate
+            print(f"Color look: {candidate}")
             break
+except Exception as e:
+    print(f"Color look skipped: {e}")
 
 world = bpy.data.worlds.get("World") or bpy.data.worlds.new("World")
 scene.world = world
@@ -740,7 +694,6 @@ glare.threshold  = 0.85
 glare.size       = 7
 comp_links.new(rl.outputs['Image'], glare.inputs['Image'])
 
-# ── Lens distortion — index-safe for 3.6 ────────────────────
 lens = comp_nodes.new('CompositorNodeLensdist')
 lens.location = (150, 0)
 try:
@@ -818,9 +771,7 @@ except Exception as e:
 # ============================================================
 print(f"Exporting USDZ: {OUTPUT_USDZ}")
 usdz_ok = False
-
 try:
-    # Blender 3.6 usd_export compatible parameters only
     bpy.ops.wm.usd_export(
         filepath=OUTPUT_USDZ,
         selected_objects_only=False,
@@ -835,7 +786,7 @@ try:
         usdz_ok = True
         print(f"USDZ exported: {OUTPUT_USDZ}")
 except Exception as e:
-    print(f"USDZ export attempt 1 failed: {e}")
+    print(f"USDZ attempt 1 failed (non-fatal): {e}")
 
 if not usdz_ok:
     try:
@@ -847,7 +798,7 @@ if not usdz_ok:
             export_materials=True)
         with zipfile.ZipFile(OUTPUT_USDZ, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.write(usdc_path, os.path.basename(usdc_path))
-        print(f"USDZ packaged via zip: {OUTPUT_USDZ}")
+        print(f"USDZ packaged: {OUTPUT_USDZ}")
     except Exception as e2:
         print(f"USDZ fallback failed (non-fatal): {e2}")
 
