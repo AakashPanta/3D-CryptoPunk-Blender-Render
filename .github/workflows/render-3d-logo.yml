@@ -29,12 +29,12 @@ jobs:
       # ─────────────────────────────────────────────────────
       # 2. CACHE BLENDER
       # ─────────────────────────────────────────────────────
-      - name: Cache Blender Installation
+      - name: Cache Blender
         id: cache-blender
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-v2
+          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-v5
 
       # ─────────────────────────────────────────────────────
       # 3. DOWNLOAD BLENDER
@@ -42,44 +42,26 @@ jobs:
       - name: Download and Install Blender
         if: steps.cache-blender.outputs.cache-hit != 'true'
         run: |
-          echo "================================================"
-          echo "  Downloading Blender ${{ env.BLENDER_VERSION }}"
-          echo "================================================"
-
+          echo "Downloading Blender ${{ env.BLENDER_VERSION }}..."
           BLENDER_TAR="blender-${{ env.BLENDER_VERSION }}-linux-x64.tar.xz"
           BLENDER_URL="https://download.blender.org/release/Blender${{ env.BLENDER_MAJOR }}/${BLENDER_TAR}"
-
-          echo "URL: ${BLENDER_URL}"
           mkdir -p ~/blender
-
-          wget -q --show-progress "${BLENDER_URL}" -O /tmp/blender.tar.xz
-
-          echo "Extracting Blender..."
+          wget -q "${BLENDER_URL}" -O /tmp/blender.tar.xz
           tar -xf /tmp/blender.tar.xz -C ~/blender --strip-components=1
           rm /tmp/blender.tar.xz
+          echo "Blender installed"
 
-          echo "Blender installed successfully"
-          ~/blender/blender --version
-
-      # ─────────────────────────────────────────────────────
-      # 4. VERIFY BLENDER
-      # ─────────────────────────────────────────────────────
       - name: Verify Blender
         run: |
-          echo "Blender version:"
           ~/blender/blender --version
           echo "BLENDER_PATH=$HOME/blender/blender" >> $GITHUB_ENV
-          echo "Blender path: $HOME/blender/blender"
 
       # ─────────────────────────────────────────────────────
-      # 5. INSTALL SYSTEM DEPENDENCIES
+      # 4. INSTALL DEPENDENCIES — Mesa software rendering
       # ─────────────────────────────────────────────────────
       - name: Install System Dependencies
         run: |
-          echo "Updating apt..."
           sudo apt-get update -y
-
-          echo "Installing display and OpenGL libraries..."
           sudo apt-get install -y \
             xvfb \
             x11-utils \
@@ -98,6 +80,7 @@ jobs:
             libxinerama1 \
             libgl1 \
             libgl1-mesa-dri \
+            libgl1-mesa-glx \
             libglx-mesa0 \
             libegl1 \
             libegl1-mesa \
@@ -105,100 +88,85 @@ jobs:
             libgles2 \
             libglib2.0-0 \
             libgomp1 \
-            libffi8 \
-            libssl3 \
-            libjpeg8 \
-            libpng16-16 \
-            libtiff5 \
-            libopenjp2-7 \
-            libwebp7 \
+            mesa-utils \
+            mesa-vulkan-drivers \
+            libvulkan1 \
+            libosmesa6 \
+            libosmesa6-dev \
             || true
 
-          echo "All dependencies installed"
+          echo "Dependencies installed"
 
-          # Verify Xvfb is available
-          which Xvfb && echo "Xvfb found" || echo "WARNING: Xvfb not found"
+          # Verify Mesa software renderer is available
+          echo "Mesa version:"
+          dpkg -l | grep -i mesa | head -10 || true
 
       # ─────────────────────────────────────────────────────
-      # 6. VERIFY SCRIPT FILE
+      # 5. VERIFY SCRIPT
       # ─────────────────────────────────────────────────────
       - name: Verify Script File
         run: |
-          echo "Checking script path: ${{ env.SCRIPT_PATH }}"
-
           if [ -f "${{ env.SCRIPT_PATH }}" ]; then
-            echo "Script found"
-            echo "Size:  $(du -sh ${{ env.SCRIPT_PATH }} | cut -f1)"
+            echo "Script found: ${{ env.SCRIPT_PATH }}"
             echo "Lines: $(wc -l < ${{ env.SCRIPT_PATH }})"
-            echo "First line: $(head -1 ${{ env.SCRIPT_PATH }})"
           else
             echo "ERROR: Script not found at ${{ env.SCRIPT_PATH }}"
-            echo ""
-            echo "Repository structure:"
-            find . -type f | grep -v ".git" | sort
+            find . -name "*.py" | grep -v ".git"
             exit 1
           fi
 
       # ─────────────────────────────────────────────────────
-      # 7. PREPARE OUTPUT DIRECTORY
+      # 6. PREPARE OUTPUT
       # ─────────────────────────────────────────────────────
       - name: Prepare Output Directory
-        run: |
-          mkdir -p output
-          echo "Output directory: $(pwd)/output"
-          ls -la output/
+        run: mkdir -p output
 
       # ─────────────────────────────────────────────────────
-      # 8. START XVFB VIRTUAL DISPLAY
-      # ─────────────────────────────────────────────────────
-      - name: Start Xvfb Virtual Display
-        run: |
-          echo "Starting Xvfb virtual display..."
-
-          # Kill any existing Xvfb on :99
-          pkill Xvfb || true
-          sleep 1
-
-          # Start fresh Xvfb
-          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-          XVFB_PID=$!
-
-          echo "XVFB_PID=${XVFB_PID}" >> $GITHUB_ENV
-          echo "DISPLAY=:99"          >> $GITHUB_ENV
-
-          # Wait for display to be ready
-          sleep 4
-
-          # Verify display is running
-          if kill -0 $XVFB_PID 2>/dev/null; then
-            echo "Xvfb running (PID: ${XVFB_PID})"
-          else
-            echo "ERROR: Xvfb failed to start"
-            exit 1
-          fi
-
-          # Test display
-          DISPLAY=:99 xdpyinfo > /dev/null 2>&1 \
-            && echo "Display :99 is responsive" \
-            || echo "WARNING: xdpyinfo check failed (non-fatal)"
-
-      # ─────────────────────────────────────────────────────
-      # 9. RUN BLENDER PIPELINE
+      # 7. RUN BLENDER — with software Mesa GL
       # ─────────────────────────────────────────────────────
       - name: Run Blender Pipeline
-        timeout-minutes: 60
+        timeout-minutes: 70
         run: |
           echo "================================================"
-          echo "  Starting Blender Headless Pipeline"
-          echo "  Script:  ${{ env.SCRIPT_PATH }}"
-          echo "  Output:  ${{ github.workspace }}/output"
-          echo "  Display: $DISPLAY"
+          echo "  Starting Blender with Mesa software rendering"
           echo "================================================"
 
-          # Run Blender — capture ALL output to log AND console
-          DISPLAY=:99 ${{ env.BLENDER_PATH }} \
+          # Force Mesa software renderer — critical for CI
+          export LIBGL_ALWAYS_SOFTWARE=1
+          export GALLIUM_DRIVER=llvmpipe
+          export MESA_GL_VERSION_OVERRIDE=4.5
+          export MESA_GLSL_VERSION_OVERRIDE=450
+          export LP_NUM_THREADS=4
+
+          # Start Xvfb
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          XVFB_PID=$!
+          sleep 3
+          export DISPLAY=:99
+
+          echo "Xvfb PID: ${XVFB_PID}"
+          echo "DISPLAY:  ${DISPLAY}"
+          echo "LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE}"
+          echo "GALLIUM_DRIVER: ${GALLIUM_DRIVER}"
+
+          # Verify GL works with software renderer
+          echo "Testing OpenGL with glxinfo..."
+          glxinfo 2>/dev/null | head -5 || echo "glxinfo not available (non-fatal)"
+
+          echo ""
+          echo "Running Blender..."
+          echo "================================================"
+
+          DISPLAY=:99 \
+          LIBGL_ALWAYS_SOFTWARE=1 \
+          GALLIUM_DRIVER=llvmpipe \
+          MESA_GL_VERSION_OVERRIDE=4.5 \
+          MESA_GLSL_VERSION_OVERRIDE=450 \
+          LP_NUM_THREADS=4 \
+          ${{ env.BLENDER_PATH }} \
             --background \
             --factory-startup \
+            --python-exit-code 1 \
             --python "${{ env.SCRIPT_PATH }}" \
             -- \
             --output-dir "${{ github.workspace }}/output" \
@@ -210,72 +178,56 @@ jobs:
           echo "  Blender exit code: ${BLENDER_EXIT}"
           echo "================================================"
 
-          # Always show last 80 lines of output for debugging
           echo ""
-          echo "--- Blender output (last 80 lines) ---"
-          tail -80 /tmp/blender_output.log || true
+          echo "--- Last 100 lines of Blender log ---"
+          tail -100 /tmp/blender_output.log || true
 
           echo ""
-          echo "--- Output directory after run ---"
-          ls -lah "${{ github.workspace }}/output/" 2>/dev/null || echo "(empty)"
+          echo "--- Output directory ---"
+          ls -lah "${{ github.workspace }}/output/" || echo "(empty)"
+
+          # Stop Xvfb
+          kill $XVFB_PID 2>/dev/null || true
 
           exit ${BLENDER_EXIT}
 
       # ─────────────────────────────────────────────────────
-      # 10. STOP XVFB
-      # ─────────────────────────────────────────────────────
-      - name: Stop Xvfb
-        if: always()
-        run: |
-          if [ -n "$XVFB_PID" ]; then
-            kill $XVFB_PID 2>/dev/null || true
-            echo "Xvfb stopped"
-          fi
-          pkill Xvfb 2>/dev/null || true
-
-      # ─────────────────────────────────────────────────────
-      # 11. VERIFY OUTPUT FILES
+      # 8. VERIFY OUTPUTS
       # ─────────────────────────────────────────────────────
       - name: Verify Output Files
         run: |
           echo "================================================"
-          echo "  Verifying output files"
+          echo "  Output verification"
           echo "================================================"
-
-          echo "Full output directory listing:"
-          ls -lah "${{ github.workspace }}/output/" 2>/dev/null || echo "(empty)"
+          ls -lah output/ || true
           echo ""
 
           RENDER_OK=false
 
-          # Check PNG render (REQUIRED)
-          if [ -f "${{ github.workspace }}/output/cryptopunk_character_render.png" ]; then
-            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character_render.png")
+          if [ -f "output/cryptopunk_character_render.png" ]; then
+            SZ=$(stat -c%s "output/cryptopunk_character_render.png")
             echo "  PNG Render:    OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
             RENDER_OK=true
           else
             echo "  PNG Render:    MISSING"
           fi
 
-          # Check .blend
-          if [ -f "${{ github.workspace }}/output/cryptopunk_character.blend" ]; then
-            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character.blend")
+          if [ -f "output/cryptopunk_character.blend" ]; then
+            SZ=$(stat -c%s "output/cryptopunk_character.blend")
             echo "  Blender Scene: OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
           else
             echo "  Blender Scene: not generated"
           fi
 
-          # Check USDZ
-          if [ -f "${{ github.workspace }}/output/cryptopunk_character.usdz" ]; then
-            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character.usdz")
+          if [ -f "output/cryptopunk_character.usdz" ]; then
+            SZ=$(stat -c%s "output/cryptopunk_character.usdz")
             echo "  USDZ iPhone:   OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
           else
             echo "  USDZ iPhone:   not generated"
           fi
 
-          # Check GLB
-          if [ -f "${{ github.workspace }}/output/cryptopunk_character.glb" ]; then
-            SZ=$(stat -c%s "${{ github.workspace }}/output/cryptopunk_character.glb")
+          if [ -f "output/cryptopunk_character.glb" ]; then
+            SZ=$(stat -c%s "output/cryptopunk_character.glb")
             echo "  GLB Web:       OK  ($(numfmt --to=iec-i --suffix=B $SZ))"
           else
             echo "  GLB Web:       not generated"
@@ -285,14 +237,14 @@ jobs:
 
           if [ "$RENDER_OK" = false ]; then
             echo "FATAL: PNG render was not produced"
-            echo "Check the blender-debug-log artifact for details"
+            echo "Download blender-debug-log artifact for details"
             exit 1
           fi
 
-          echo "Pipeline completed successfully"
+          echo "SUCCESS: All required outputs present"
 
       # ─────────────────────────────────────────────────────
-      # 12. UPLOAD ARTIFACTS
+      # 9. UPLOAD ARTIFACTS
       # ─────────────────────────────────────────────────────
 
       - name: Upload Blender Debug Log
@@ -350,7 +302,7 @@ jobs:
           if-no-files-found: warn
 
       # ─────────────────────────────────────────────────────
-      # 13. JOB SUMMARY
+      # 10. JOB SUMMARY
       # ─────────────────────────────────────────────────────
       - name: Job Summary
         if: always()
@@ -366,9 +318,9 @@ jobs:
             "iPhone AR:USDZ:output/cryptopunk_character.usdz" \
             "Web 3D:GLB:output/cryptopunk_character.glb"; do
 
-            LABEL=$(echo "$entry"  | cut -d: -f1)
+            LABEL=$(echo  "$entry" | cut -d: -f1)
             FORMAT=$(echo "$entry" | cut -d: -f2)
-            FILE=$(echo "$entry"   | cut -d: -f3)
+            FILE=$(echo   "$entry" | cut -d: -f3)
 
             if [ -f "$FILE" ] && [ -s "$FILE" ]; then
               SZ=$(numfmt --to=iec-i --suffix=B $(stat -c%s "$FILE"))
@@ -383,20 +335,14 @@ jobs:
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Blender | ${{ env.BLENDER_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| GL Mode | Mesa LLVMpipe (software) |" >> $GITHUB_STEP_SUMMARY
           echo "| Engine | Cycles CPU |" >> $GITHUB_STEP_SUMMARY
           echo "| Resolution | 2048 x 2048 |" >> $GITHUB_STEP_SUMMARY
           echo "| Samples | 256 + OIDN Denoiser |" >> $GITHUB_STEP_SUMMARY
-          echo "| Camera | 85mm f/1.8 Portrait |" >> $GITHUB_STEP_SUMMARY
-          echo "| Post FX | Bloom + Vignette + Color Grade |" >> $GITHUB_STEP_SUMMARY
           echo "| Runner | ubuntu-22.04 |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### iPhone AR Instructions" >> $GITHUB_STEP_SUMMARY
+          echo "### iPhone AR" >> $GITHUB_STEP_SUMMARY
           echo "1. Download **character-iPhone-AR-USDZ** from Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "2. AirDrop or iCloud Drive to iPhone" >> $GITHUB_STEP_SUMMARY
-          echo "3. Tap .usdz in Files app" >> $GITHUB_STEP_SUMMARY
-          echo "4. Tap AR cube icon to place in your room" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Debug" >> $GITHUB_STEP_SUMMARY
-          echo "If the render failed, download **blender-debug-log** from Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "and check the full Blender output for the exact error." >> $GITHUB_STEP_SUMMARY
+          echo "3. Tap .usdz in Files app → tap AR cube icon" >> $GITHUB_STEP_SUMMARY
