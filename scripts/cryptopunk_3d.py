@@ -1,13 +1,20 @@
+import bpy
+
+# Guaranteed context references
+scene = bpy.context.scene
+view_layer = bpy.context.view_layer
+collection = bpy.context.collection
+
+
 # ============================================================
 # COMPOSITOR
 # ============================================================
 print("Setting up compositor...")
 
-def setup_compositor(scene: bpy.types.Scene) -> None:
+def setup_compositor(scene) -> None:
     """
     Configure compositor safely.
-    If any node is unsupported in the current Blender/runtime,
-    the script will continue without crashing the whole render.
+    If some node is unsupported or fails, continue without crashing.
     """
     if scene is None:
         raise RuntimeError("No active Blender scene found")
@@ -21,49 +28,45 @@ def setup_compositor(scene: bpy.types.Scene) -> None:
     comp_nodes = comp_tree.nodes
     comp_links = comp_tree.links
 
-    # Clear existing compositor nodes
+    # Clear old nodes
     comp_nodes.clear()
 
-    # ------------------------------------------------------------
     # Render Layers
-    # ------------------------------------------------------------
     rl = comp_nodes.new(type='CompositorNodeRLayers')
     rl.location = (-400, 0)
+    last_image_out = rl.outputs['Image']
 
-    # ------------------------------------------------------------
-    # Glare / bloom
-    # ------------------------------------------------------------
-    glare = comp_nodes.new(type='CompositorNodeGlare')
-    glare.location = (-100, 0)
-    glare.glare_type = 'FOG_GLOW'
-    glare.quality = 'HIGH'
-    glare.threshold = 0.85
-    glare.size = 7
+    # Glare
+    try:
+        glare = comp_nodes.new(type='CompositorNodeGlare')
+        glare.location = (-100, 0)
+        glare.glare_type = 'FOG_GLOW'
+        glare.quality = 'HIGH'
+        glare.threshold = 0.85
+        glare.size = 7
 
-    comp_links.new(rl.outputs['Image'], glare.inputs['Image'])
-    last_image_out = glare.outputs['Image']
+        comp_links.new(last_image_out, glare.inputs['Image'])
+        last_image_out = glare.outputs['Image']
+        print("Glare: OK")
+    except Exception as e:
+        print(f"Glare skipped: {e}")
 
-    # ------------------------------------------------------------
     # Lens distortion
-    # ------------------------------------------------------------
     try:
         lens = comp_nodes.new(type='CompositorNodeLensdist')
         lens.location = (150, 0)
 
-        # Index 1 = Distort, Index 2 = Dispersion
+        # Distort / Dispersion sockets
         lens.inputs[1].default_value = -0.015
         lens.inputs[2].default_value = 0.004
 
         comp_links.new(last_image_out, lens.inputs['Image'])
         last_image_out = lens.outputs['Image']
         print("Lens distortion: OK")
-
     except Exception as e:
         print(f"Lens distortion skipped: {e}")
 
-    # ------------------------------------------------------------
     # Color balance
-    # ------------------------------------------------------------
     try:
         cb = comp_nodes.new(type='CompositorNodeColorBalance')
         cb.location = (400, 0)
@@ -75,13 +78,10 @@ def setup_compositor(scene: bpy.types.Scene) -> None:
         comp_links.new(last_image_out, cb.inputs['Image'])
         last_image_out = cb.outputs['Image']
         print("Color balance: OK")
-
     except Exception as e:
         print(f"Color balance skipped: {e}")
 
-    # ------------------------------------------------------------
     # Vignette
-    # ------------------------------------------------------------
     try:
         ellipse = comp_nodes.new(type='CompositorNodeEllipseMask')
         ellipse.location = (150, -250)
@@ -105,21 +105,20 @@ def setup_compositor(scene: bpy.types.Scene) -> None:
 
         last_image_out = mix_vig.outputs['Image']
         print("Vignette: OK")
-
     except Exception as e:
         print(f"Vignette skipped: {e}")
 
-    # ------------------------------------------------------------
-    # Outputs
-    # ------------------------------------------------------------
+    # Composite output
     comp_out = comp_nodes.new(type='CompositorNodeComposite')
     comp_out.location = (850, 0)
     comp_links.new(last_image_out, comp_out.inputs['Image'])
 
+    # Viewer output
     try:
         viewer = comp_nodes.new(type='CompositorNodeViewer')
         viewer.location = (850, -150)
         comp_links.new(last_image_out, viewer.inputs['Image'])
+        print("Viewer: OK")
     except Exception as e:
         print(f"Viewer skipped: {e}")
 
