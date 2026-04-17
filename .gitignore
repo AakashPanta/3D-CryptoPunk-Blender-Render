@@ -1,0 +1,8 @@
+*.blend1
+*.blend2
+output/*.png
+output/*.blend
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
