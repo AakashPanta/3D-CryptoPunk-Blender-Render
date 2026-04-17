@@ -39,7 +39,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-3.6.21-ubuntu22-v11
+          key: blender-3.6.21-ubuntu22-v12
 
       - name: Download Blender 3.6 LTS
         if: steps.cache-blender.outputs.cache-hit != 'true'
@@ -242,9 +242,46 @@ jobs:
           echo "=== Last 150 lines ==="
           tail -150 /tmp/blender_output.log || true
           echo ""
-          echo "=== Output files ==="
+          echo "=== Output files after Blender ==="
           ls -lah "${{ github.workspace }}/output/" || true
           exit "${BLENDER_EXIT}"
+
+      - name: Convert GLB to USDZ
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GLB_PATH="${{ github.workspace }}/output/cryptopunk_character.glb"
+          USDZ_PATH="${{ github.workspace }}/output/cryptopunk_character.usdz"
+
+          if [ ! -f "$GLB_PATH" ]; then
+            echo "GLB missing, cannot convert to USDZ."
+            exit 0
+          fi
+
+          echo "=== Docker version ==="
+          docker --version
+
+          echo "=== Pull USDZ converter image ==="
+          docker pull marlon360/usd-from-gltf:latest
+
+          echo "=== Convert GLB -> USDZ ==="
+          docker run --rm \
+            -v "${{ github.workspace }}/output:/usr/app" \
+            marlon360/usd-from-gltf:latest \
+            cryptopunk_character.glb \
+            cryptopunk_character.usdz
+
+          echo "=== Output files after USDZ conversion ==="
+          ls -lah "${{ github.workspace }}/output/" || true
+
+          if [ -f "$USDZ_PATH" ]; then
+            echo "USDZ conversion: OK"
+          else
+            echo "USDZ conversion: FAILED"
+            exit 1
+          fi
 
       - name: Verify Output Files
         shell: bash
@@ -273,19 +310,6 @@ jobs:
           [ "$RENDER_OK" = false ] && echo "FATAL: PNG missing" && exit 1
 
           echo "SUCCESS"
-
-      - name: Check USDZ output
-        id: usdz_check
-        if: always()
-        shell: bash
-        run: |
-          if [ -f "output/cryptopunk_character.usdz" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "USDZ found."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "USDZ not generated. Skipping upload."
-          fi
 
       - name: Upload Debug Log
         uses: actions/upload-artifact@v4
@@ -325,11 +349,12 @@ jobs:
 
       - name: Upload USDZ iPhone AR
         uses: actions/upload-artifact@v4
-        if: always() && steps.usdz_check.outputs.exists == 'true'
+        if: always()
         with:
           name: character-iPhone-AR-USDZ
           path: output/cryptopunk_character.usdz
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Upload GLB Web
         uses: actions/upload-artifact@v4
