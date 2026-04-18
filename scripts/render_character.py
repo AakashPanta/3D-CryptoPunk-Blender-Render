@@ -12,6 +12,7 @@ def parse_args():
     argv = sys.argv
     output_dir = os.path.join(os.getcwd(), "output")
     reference_image = None
+    style_glb = None
 
     if "--" in argv:
         args = argv[argv.index("--") + 1:]
@@ -25,12 +26,16 @@ def parse_args():
                 reference_image = args[i + 1]
                 i += 2
                 continue
+            if args[i] == "--style-glb" and i + 1 < len(args):
+                style_glb = args[i + 1]
+                i += 2
+                continue
             i += 1
 
-    return output_dir, reference_image
+    return output_dir, reference_image, style_glb
 
 
-OUTPUT_DIR, REFERENCE_IMAGE = parse_args()
+OUTPUT_DIR, REFERENCE_IMAGE, STYLE_GLB = parse_args()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 OUTPUT_PNG = os.path.join(OUTPUT_DIR, "character_render.png")
@@ -42,6 +47,7 @@ print("Automated 3D character reconstruction render")
 print("=" * 80)
 print(f"OUTPUT_DIR      = {OUTPUT_DIR}")
 print(f"REFERENCE_IMAGE = {REFERENCE_IMAGE}")
+print(f"STYLE_GLB       = {STYLE_GLB}")
 print(f"OUTPUT_PNG      = {OUTPUT_PNG}")
 print(f"OUTPUT_BLEND    = {OUTPUT_BLEND}")
 print(f"OUTPUT_GLB      = {OUTPUT_GLB}")
@@ -118,6 +124,18 @@ def add_bevel(obj, width=0.01, segments=3):
     return mod
 
 
+def add_solidify(obj, thickness=0.004):
+    mod = obj.modifiers.new("Solidify", 'SOLIDIFY')
+    mod.thickness = thickness
+    return mod
+
+
+def add_weighted_normal(obj):
+    mod = obj.modifiers.new("WeightedNormal", 'WEIGHTED_NORMAL')
+    mod.keep_sharp = True
+    return mod
+
+
 def assign_mat(obj, mat):
     if not obj.data:
         return
@@ -152,10 +170,10 @@ def make_principled(
     nodes.clear()
 
     out = nodes.new(type="ShaderNodeOutputMaterial")
-    out.location = (450, 0)
+    out.location = (600, 0)
 
     bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
-    bsdf.location = (120, 0)
+    bsdf.location = (260, 0)
     bsdf.inputs["Base Color"].default_value = base_color
     bsdf.inputs["Roughness"].default_value = roughness
     bsdf.inputs["Metallic"].default_value = metallic
@@ -188,6 +206,153 @@ def make_principled(
         bsdf.inputs["Emission Strength"].default_value = emission_strength
 
     links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+    mat_cache[name] = mat
+    return mat
+
+
+def make_helmet_style_material(
+    name,
+    base_color=(0.26, 0.30, 0.34, 1.0),
+    accent_color=(0.74, 0.28, 0.10, 1.0),
+    edge_color=(0.62, 0.66, 0.70, 1.0),
+    roughness=0.42,
+    metallic=0.72,
+):
+    """
+    Damaged hard-surface material language inspired by the uploaded helmet:
+    - base color albedo
+    - metallic/roughness breakup
+    - edge wear
+    - grime noise
+    - subtle emissive traces
+    """
+    if name in mat_cache:
+        return mat_cache[name]
+
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+
+    nt = mat.node_tree
+    nodes = nt.nodes
+    links = nt.links
+    nodes.clear()
+
+    out = nodes.new("ShaderNodeOutputMaterial")
+    out.location = (1300, 0)
+
+    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+    bsdf.location = (1000, 0)
+    bsdf.inputs["Metallic"].default_value = metallic
+    bsdf.inputs["Roughness"].default_value = roughness
+    if "Specular IOR Level" in bsdf.inputs:
+        bsdf.inputs["Specular IOR Level"].default_value = 0.45
+    elif "Specular" in bsdf.inputs:
+        bsdf.inputs["Specular"].default_value = 0.45
+
+    texcoord = nodes.new("ShaderNodeTexCoord")
+    texcoord.location = (-1200, 100)
+
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.location = (-980, 100)
+    mapping.inputs["Scale"].default_value = (4.0, 4.0, 4.0)
+
+    noise_large = nodes.new("ShaderNodeTexNoise")
+    noise_large.location = (-760, 240)
+    noise_large.inputs["Scale"].default_value = 3.2
+    noise_large.inputs["Detail"].default_value = 8.0
+    noise_large.inputs["Roughness"].default_value = 0.55
+
+    noise_fine = nodes.new("ShaderNodeTexNoise")
+    noise_fine.location = (-760, -20)
+    noise_fine.inputs["Scale"].default_value = 24.0
+    noise_fine.inputs["Detail"].default_value = 10.0
+    noise_fine.inputs["Roughness"].default_value = 0.65
+
+    voronoi = nodes.new("ShaderNodeTexVoronoi")
+    voronoi.location = (-760, -260)
+    voronoi.feature = 'DISTANCE_TO_EDGE'
+    voronoi.inputs["Scale"].default_value = 12.0
+
+    ramp_wear = nodes.new("ShaderNodeValToRGB")
+    ramp_wear.location = (-500, -260)
+    ramp_wear.color_ramp.elements[0].position = 0.25
+    ramp_wear.color_ramp.elements[1].position = 0.55
+
+    ramp_grime = nodes.new("ShaderNodeValToRGB")
+    ramp_grime.location = (-500, 220)
+    ramp_grime.color_ramp.elements[0].position = 0.34
+    ramp_grime.color_ramp.elements[1].position = 0.78
+
+    mix_base_grime = nodes.new("ShaderNodeMixRGB")
+    mix_base_grime.location = (-120, 180)
+    mix_base_grime.blend_type = 'MULTIPLY'
+    mix_base_grime.inputs[0].default_value = 0.35
+    mix_base_grime.inputs[1].default_value = base_color
+
+    mix_edge = nodes.new("ShaderNodeMixRGB")
+    mix_edge.location = (120, 40)
+    mix_edge.blend_type = 'MIX'
+    mix_edge.inputs[1].default_value = base_color
+    mix_edge.inputs[2].default_value = edge_color
+
+    mix_accent = nodes.new("ShaderNodeMixRGB")
+    mix_accent.location = (360, -80)
+    mix_accent.blend_type = 'MIX'
+    mix_accent.inputs[1].default_value = base_color
+    mix_accent.inputs[2].default_value = accent_color
+
+    rough_mix = nodes.new("ShaderNodeMixRGB")
+    rough_mix.location = (360, 240)
+    rough_mix.blend_type = 'MIX'
+    rough_mix.inputs[1].default_value = (roughness, roughness, roughness, 1.0)
+    rough_mix.inputs[2].default_value = (min(roughness + 0.24, 1.0),) * 3 + (1.0,)
+
+    bump = nodes.new("ShaderNodeBump")
+    bump.location = (720, 240)
+    bump.inputs["Strength"].default_value = 0.08
+    bump.inputs["Distance"].default_value = 0.08
+
+    emission_mix = nodes.new("ShaderNodeMixRGB")
+    emission_mix.location = (720, -220)
+    emission_mix.blend_type = 'MIX'
+    emission_mix.inputs[1].default_value = (0.0, 0.0, 0.0, 1.0)
+    emission_mix.inputs[2].default_value = (0.75, 0.24, 0.08, 1.0)
+
+    links.new(texcoord.outputs["Object"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], noise_large.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], noise_fine.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], voronoi.inputs["Vector"])
+
+    links.new(noise_large.outputs["Fac"], ramp_grime.inputs["Fac"])
+    links.new(voronoi.outputs["Distance"], ramp_wear.inputs["Fac"])
+
+    links.new(ramp_grime.outputs["Color"], mix_base_grime.inputs[2])
+    links.new(ramp_wear.outputs["Color"], mix_edge.inputs[0])
+    links.new(mix_base_grime.outputs["Color"], mix_edge.inputs[1])
+
+    links.new(noise_fine.outputs["Fac"], mix_accent.inputs[0])
+    links.new(mix_edge.outputs["Color"], mix_accent.inputs[1])
+
+    links.new(noise_large.outputs["Fac"], rough_mix.inputs[0])
+    links.new(rough_mix.outputs["Color"], bsdf.inputs["Roughness"])
+    links.new(noise_fine.outputs["Fac"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
+    bsdf.inputs["Base Color"].default_value = base_color
+    links.new(mix_accent.outputs["Color"], bsdf.inputs["Base Color"])
+
+    if "Emission Color" in bsdf.inputs:
+        links.new(ramp_wear.outputs["Color"], emission_mix.inputs[0])
+        links.new(emission_mix.outputs["Color"], bsdf.inputs["Emission Color"])
+    elif "Emission" in bsdf.inputs:
+        links.new(ramp_wear.outputs["Color"], emission_mix.inputs[0])
+        links.new(emission_mix.outputs["Color"], bsdf.inputs["Emission"])
+
+    if "Emission Strength" in bsdf.inputs:
+        bsdf.inputs["Emission Strength"].default_value = 0.18
+
+    links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+
     mat_cache[name] = mat
     return mat
 
@@ -299,6 +464,168 @@ def point_light(name, location, energy, color, radius):
     obj.location = location
     return obj
 
+
+def import_style_glb(style_glb_path):
+    """
+    Imports the uploaded GLB as a side reference object and extracts its first material
+    so the render scene carries the same hard-surface damaged design language.
+    """
+    imported_objects = []
+
+    if not style_glb_path:
+        return imported_objects, None
+
+    if not os.path.exists(style_glb_path):
+        print(f"Style GLB not found: {style_glb_path}")
+        return imported_objects, None
+
+    before = set(bpy.data.objects)
+    try:
+        bpy.ops.import_scene.gltf(filepath=style_glb_path)
+        after = set(bpy.data.objects)
+        imported_objects = list(after - before)
+        print(f"Imported style GLB objects: {len(imported_objects)}")
+    except Exception as e:
+        print(f"Style GLB import failed: {e}")
+        return [], None
+
+    style_material = None
+    for obj in imported_objects:
+        obj.name = f"StyleRef_{obj.name}"
+        if obj.type == 'MESH' and obj.data and obj.data.materials and not style_material:
+            style_material = obj.data.materials[0]
+
+    # Move imported style object to side reference area
+    for obj in imported_objects:
+        if obj.type == 'MESH':
+            obj.location.x += 2.7
+            obj.location.y += 0.2
+            obj.location.z += 0.6
+            obj.scale *= 0.55
+
+    return imported_objects, style_material
+
+
+def build_mech_panels():
+    """
+    Extra design elements that borrow the damaged helmet language and inject it
+    into the cap, collar, wrist, and lighter area so the scene reads in the same style family.
+    """
+    panel_mat = make_helmet_style_material(
+        "M_HelmetStyle_Main",
+        base_color=(0.24, 0.28, 0.32, 1.0),
+        accent_color=(0.78, 0.30, 0.08, 1.0),
+        edge_color=(0.74, 0.76, 0.80, 1.0),
+        roughness=0.38,
+        metallic=0.78,
+    )
+
+    dark_panel = make_helmet_style_material(
+        "M_HelmetStyle_Dark",
+        base_color=(0.10, 0.12, 0.15, 1.0),
+        accent_color=(0.62, 0.18, 0.04, 1.0),
+        edge_color=(0.54, 0.56, 0.60, 1.0),
+        roughness=0.48,
+        metallic=0.84,
+    )
+
+    orange_glow = make_principled(
+        "M_HelmetGlow",
+        base_color=(0.18, 0.07, 0.02, 1.0),
+        roughness=0.10,
+        metallic=0.10,
+        emission_color=(0.95, 0.36, 0.08, 1.0),
+        emission_strength=1.8,
+    )
+
+    # Cap armor side plates
+    cap_plate_l = cube(
+        "CapArmorL",
+        (-0.33, -0.08, 2.06),
+        scale=(0.12, 0.05, 0.11),
+        rot=(math.radians(18), math.radians(-6), math.radians(8)),
+        mat=panel_mat,
+    )
+    add_bevel(cap_plate_l, width=0.01, segments=2)
+    add_weighted_normal(cap_plate_l)
+
+    cap_plate_r = cube(
+        "CapArmorR",
+        (0.31, -0.09, 2.01),
+        scale=(0.10, 0.04, 0.09),
+        rot=(math.radians(18), math.radians(5), math.radians(-6)),
+        mat=dark_panel,
+    )
+    add_bevel(cap_plate_r, width=0.008, segments=2)
+    add_weighted_normal(cap_plate_r)
+
+    # Jaw-side cheek armor hint
+    cheek_l = cube(
+        "CheekArmorL",
+        (-0.23, -0.18, 1.70),
+        scale=(0.06, 0.02, 0.12),
+        rot=(math.radians(10), math.radians(18), math.radians(22)),
+        mat=dark_panel,
+    )
+    add_bevel(cheek_l, width=0.004, segments=2)
+
+    # Collar mechanical tags
+    collar_plate_l = cube(
+        "CollarPlateL",
+        (-0.18, -0.22, 1.28),
+        scale=(0.08, 0.02, 0.14),
+        rot=(math.radians(-12), math.radians(10), math.radians(15)),
+        mat=panel_mat,
+    )
+    add_bevel(collar_plate_l, width=0.005, segments=2)
+
+    collar_plate_r = cube(
+        "CollarPlateR",
+        (0.18, -0.22, 1.23),
+        scale=(0.07, 0.02, 0.12),
+        rot=(math.radians(-10), math.radians(-10), math.radians(-12)),
+        mat=dark_panel,
+    )
+    add_bevel(collar_plate_r, width=0.005, segments=2)
+
+    # Wrist module
+    wrist_module = cube(
+        "WristModule",
+        (0.60, -0.29, 0.70),
+        scale=(0.06, 0.028, 0.05),
+        rot=(math.radians(54), math.radians(8), math.radians(16)),
+        mat=panel_mat,
+    )
+    add_bevel(wrist_module, width=0.006, segments=2)
+
+    wrist_glow = cube(
+        "WristGlow",
+        (0.625, -0.31, 0.715),
+        scale=(0.016, 0.004, 0.025),
+        rot=(math.radians(54), math.radians(8), math.radians(16)),
+        mat=orange_glow,
+    )
+    add_bevel(wrist_glow, width=0.002, segments=2)
+
+    # Lighter body shell to match helmet style
+    lighter_shell = cube(
+        "LighterShell",
+        (0.73, -0.42, 0.64),
+        scale=(0.065, 0.032, 0.122),
+        rot=(math.radians(2), math.radians(4), math.radians(8)),
+        mat=panel_mat,
+    )
+    add_bevel(lighter_shell, width=0.008, segments=3)
+
+    lighter_glow = cube(
+        "LighterGlowPanel",
+        (0.752, -0.435, 0.655),
+        scale=(0.012, 0.004, 0.028),
+        rot=(math.radians(2), math.radians(4), math.radians(8)),
+        mat=orange_glow,
+    )
+    add_bevel(lighter_glow, width=0.002, segments=2)
+
 # ============================================================
 # MATERIALS
 # ============================================================
@@ -375,6 +702,11 @@ if REFERENCE_IMAGE and os.path.exists(REFERENCE_IMAGE):
         assign_mat(ref_plane, ref_mat)
     except Exception as e:
         print(f"Reference plane skipped: {e}")
+
+# ============================================================
+# IMPORT STYLE GLB
+# ============================================================
+STYLE_IMPORTED_OBJECTS, STYLE_IMPORTED_MATERIAL = import_style_glb(STYLE_GLB)
 
 # ============================================================
 # SUBJECT
@@ -492,6 +824,17 @@ cylinder("CigEmber", (0.52, -0.397, 1.64), 0.015, 0.020, rot=(math.radians(86), 
 curve_smoke("Smoke0", [(0.55, -0.39, 1.67), (0.67, -0.27, 1.74), (0.79, -0.22, 1.84), (0.90, -0.18, 1.98)], 0.014, M_SMOKE)
 curve_smoke("Smoke1", [(0.57, -0.37, 1.65), (0.67, -0.30, 1.77), (0.76, -0.26, 1.92), (0.83, -0.18, 2.06)], 0.011, M_SMOKE)
 curve_smoke("Smoke2", [(0.56, -0.40, 1.66), (0.62, -0.32, 1.79), (0.70, -0.24, 1.90), (0.77, -0.12, 2.00)], 0.009, M_SMOKE)
+
+# Inject style-inspired hard-surface elements
+build_mech_panels()
+
+# If the imported GLB brought a usable material, place it onto one hero prop shell too
+if STYLE_IMPORTED_MATERIAL:
+    try:
+        assign_mat(lighter_body, STYLE_IMPORTED_MATERIAL)
+        print("Applied imported style material to lighter body.")
+    except Exception as e:
+        print(f"Imported style material application skipped: {e}")
 
 # ============================================================
 # ENVIRONMENT
