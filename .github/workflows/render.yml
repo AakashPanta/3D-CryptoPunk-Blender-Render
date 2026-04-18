@@ -9,6 +9,7 @@ env:
   BLENDER_VERSION: "3.6.21"
   SCRIPT_PATH: "scripts/render_character.py"
   REF_IMAGE: "assets/reference.png"
+  STYLE_GLB: "assets/Damaged Helmet.glb"
 
 jobs:
   render:
@@ -42,10 +43,12 @@ jobs:
 
           echo "Expected script: ${{ env.SCRIPT_PATH }}"
           echo "Expected ref:    ${{ env.REF_IMAGE }}"
+          echo "Expected style:  ${{ env.STYLE_GLB }}"
           echo ""
 
           [ -f "${{ env.SCRIPT_PATH }}" ] || { echo "Missing script file"; exit 1; }
           [ -f "${{ env.REF_IMAGE }}" ] || { echo "Missing reference image"; exit 1; }
+          [ -f "${{ env.STYLE_GLB }}" ] || { echo "Missing style GLB"; exit 1; }
 
           echo "All required inputs found."
 
@@ -54,7 +57,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/blender
-          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-render-v4
+          key: blender-${{ env.BLENDER_VERSION }}-ubuntu22-render-style-v1
 
       - name: Download Blender
         if: steps.cache-blender.outputs.cache-hit != 'true'
@@ -145,6 +148,7 @@ jobs:
             -- \
             --output-dir "${{ github.workspace }}/output" \
             --reference-image "${{ github.workspace }}/${{ env.REF_IMAGE }}" \
+            --style-glb "${{ github.workspace }}/${{ env.STYLE_GLB }}" \
             2>&1 | tee /tmp/blender_output.log
 
       - name: Show render log tail
